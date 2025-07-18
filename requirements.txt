@@ -1,0 +1,35 @@
+# Core libraries
+streamlit
+pandas
+numpy
+
+# Web scraping and HTTP
+requests
+beautifulsoup4
+lxml
+urllib3
+
+# Network analysis
+networkx
+
+# Visualization
+plotly
+matplotlib
+seaborn
+
+# Excel/CSV handling
+xlsxwriter
+openpyxl
+
+# Natural language processing
+nltk
+textblob
+
+# Machine learning for categorization
+scikit-learn
+
+# Date/time handling
+python-dateutil
+
+# Base64 encoding for API
+base64

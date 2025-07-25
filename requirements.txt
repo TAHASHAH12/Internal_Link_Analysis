@@ -17,4 +17,4 @@ openpyxl
 nltk
 textblob
 python-dateutil
-
+openai

@@ -9,6 +9,7 @@ import time
 import plotly.express as px
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
+import plotly.figure_factory as ff
 import io
 import zipfile
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -25,87 +26,274 @@ from textblob import TextBlob
 import nltk
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.cluster import KMeans
-warnings.filterwarnings('ignore')
+import openai
+from openai import OpenAI
+import os
+import threading
+from queue import Queue
+import hashlib
+import xlsxwriter
+from xlsxwriter.utility import xl_rowcol_to_cell
+import tempfile
+import gc
+import weakref
+import pickle
+from functools import lru_cache
+import logging
 
-# Download required NLTK data
-try:
-    nltk.data.find('tokenizers/punkt')
-except LookupError:
-    nltk.download('punkt', quiet=True)
+warnings.filterwarnings('ignore')
 
 # Configure Streamlit page
 st.set_page_config(
-    page_title="Universal PageRank SEO Analyzer",
+    page_title="🚀 Advanced PageRank SEO Analyzer with AI Insights",
     page_icon="📊",
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
-# Custom CSS for better UI
+# Enhanced CSS for stunning visuals
 st.markdown("""
 <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+    
+    * {
+        font-family: 'Inter', sans-serif;
+    }
+    
     .main-header {
-        font-size: 2.5rem;
-        font-weight: bold;
-        color: #1f77b4;
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 50%, #6B73FF 100%);
+        padding: 3rem 2rem;
+        border-radius: 20px;
+        color: white;
         text-align: center;
         margin-bottom: 2rem;
+        box-shadow: 0 20px 40px rgba(102, 126, 234, 0.3);
+        position: relative;
+        overflow: hidden;
     }
-    .metric-container {
-        background-color: #f0f2f6;
-        padding: 1rem;
-        border-radius: 0.5rem;
+    
+    .main-header::before {
+        content: '';
+        position: absolute;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background: url('data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><defs><pattern id="grain" width="100" height="100" patternUnits="userSpaceOnUse"><circle cx="20" cy="20" r="1" fill="white" opacity="0.1"/><circle cx="80" cy="40" r="1" fill="white" opacity="0.1"/><circle cx="40" cy="80" r="1" fill="white" opacity="0.1"/></pattern></defs><rect width="100" height="100" fill="url(%23grain)"/></svg>') repeat;
+        opacity: 0.3;
+    }
+    
+    .main-header > * {
+        position: relative;
+        z-index: 2;
+    }
+    
+    .metric-card {
+        background: linear-gradient(135deg, #ffffff 0%, #f8fafc 100%);
+        padding: 2rem;
+        border-radius: 16px;
+        box-shadow: 0 10px 30px rgba(0, 0, 0, 0.1);
+        border: 1px solid rgba(255, 255, 255, 0.5);
+        margin: 1rem 0;
+        transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        position: relative;
+        overflow: hidden;
+    }
+    
+    .metric-card::before {
+        content: '';
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 4px;
+        background: linear-gradient(90deg, #667eea, #764ba2);
+    }
+    
+    .metric-card:hover {
+        transform: translateY(-8px) scale(1.02);
+        box-shadow: 0 20px 40px rgba(0, 0, 0, 0.15);
+    }
+    
+    .insight-card {
+        background: linear-gradient(135deg, #e8f4fd 0%, #dbeafe 100%);
+        padding: 2rem;
+        border-radius: 16px;
+        margin: 1rem 0;
+        border-left: 6px solid #3b82f6;
+        box-shadow: 0 8px 25px rgba(59, 130, 246, 0.15);
+        transition: transform 0.3s ease;
+    }
+    
+    .insight-card:hover {
+        transform: translateX(8px);
+    }
+    
+    .warning-card {
+        background: linear-gradient(135deg, #fef3c7 0%, #fbbf24 20%, #f59e0b 100%);
+        padding: 2rem;
+        border-radius: 16px;
+        margin: 1rem 0;
+        border-left: 6px solid #f59e0b;
+        box-shadow: 0 8px 25px rgba(245, 158, 11, 0.25);
+        color: #92400e;
+    }
+    
+    .critical-card {
+        background: linear-gradient(135deg, #fee2e2 0%, #fca5a5 20%, #ef4444 100%);
+        padding: 2rem;
+        border-radius: 16px;
+        margin: 1rem 0;
+        border-left: 6px solid #ef4444;
+        box-shadow: 0 8px 25px rgba(239, 68, 68, 0.25);
+        color: #991b1b;
+    }
+    
+    .success-card {
+        background: linear-gradient(135deg, #dcfce7 0%, #86efac 20%, #22c55e 100%);
+        padding: 2rem;
+        border-radius: 16px;
+        margin: 1rem 0;
+        border-left: 6px solid #22c55e;
+        box-shadow: 0 8px 25px rgba(34, 197, 94, 0.25);
+        color: #14532d;
+    }
+    
+    .ai-card {
+        background: linear-gradient(135deg, #f3e8ff 0%, #c084fc 20%, #8b5cf6 100%);
+        padding: 2rem;
+        border-radius: 16px;
+        margin: 1rem 0;
+        border-left: 6px solid #8b5cf6;
+        box-shadow: 0 8px 25px rgba(139, 92, 246, 0.25);
+        color: #581c87;
+    }
+    
+    .route-card {
+        background: linear-gradient(135deg, #ecfdf5 0%, #6ee7b7 20%, #10b981 100%);
+        padding: 1.5rem;
+        border-radius: 12px;
         margin: 0.5rem 0;
+        border-left: 4px solid #10b981;
+        box-shadow: 0 4px 15px rgba(16, 185, 129, 0.2);
+        transition: all 0.3s ease;
     }
-    .success-box {
-        background-color: #d4edda;
-        border: 1px solid #c3e6cb;
-        color: #155724;
+    
+    .route-card:hover {
+        transform: scale(1.02);
+        box-shadow: 0 8px 25px rgba(16, 185, 129, 0.3);
+    }
+    
+    .question-header {
+        background: linear-gradient(90deg, #8b5cf6 0%, #3b82f6 50%, #06b6d4 100%);
+        color: white;
+        padding: 1.5rem 2rem;
+        border-radius: 12px;
+        margin: 2rem 0 1rem 0;
+        font-weight: 600;
+        font-size: 1.3em;
+        box-shadow: 0 8px 25px rgba(139, 92, 246, 0.3);
+        position: relative;
+        overflow: hidden;
+    }
+    
+    .question-header::after {
+        content: '';
+        position: absolute;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background: linear-gradient(45deg, transparent 30%, rgba(255,255,255,0.1) 50%, transparent 70%);
+        animation: shimmer 3s infinite;
+    }
+    
+    @keyframes shimmer {
+        0% { transform: translateX(-100%); }
+        100% { transform: translateX(100%); }
+    }
+    
+    .stTabs [data-baseweb="tab-list"] {
+        gap: 12px;
+        background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
         padding: 1rem;
-        border-radius: 0.5rem;
-        margin: 1rem 0;
+        border-radius: 16px;
+        box-shadow: 0 8px 25px rgba(102, 126, 234, 0.3);
     }
-    .warning-box {
-        background-color: #fff3cd;
-        border: 1px solid #ffeaa7;
-        color: #856404;
+    
+    .stTabs [data-baseweb="tab"] {
+        height: 65px;
+        padding: 0 32px;
+        background: rgba(255, 255, 255, 0.15);
+        border-radius: 12px;
+        color: white;
+        font-weight: 600;
+        font-size: 1.1em;
+        transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        backdrop-filter: blur(10px);
+    }
+    
+    .stTabs [data-baseweb="tab"]:hover {
+        background: rgba(255, 255, 255, 0.25);
+        transform: translateY(-2px);
+    }
+    
+    .stTabs [aria-selected="true"] {
+        background: rgba(255, 255, 255, 0.95);
+        color: #667eea;
+        transform: translateY(-4px);
+        box-shadow: 0 8px 25px rgba(255, 255, 255, 0.3);
+    }
+    
+    .progress-container {
+        background: rgba(255, 255, 255, 0.95);
+        padding: 2rem;
+        border-radius: 16px;
+        margin: 1rem 0;
+        box-shadow: 0 8px 25px rgba(0, 0, 0, 0.1);
+        backdrop-filter: blur(10px);
+    }
+    
+    .stats-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+        gap: 1rem;
+        margin: 2rem 0;
+    }
+    
+    .route-tree {
+        background: linear-gradient(135deg, #f8fafc 0%, #e2e8f0 100%);
+        padding: 2rem;
+        border-radius: 16px;
+        margin: 1rem 0;
+        box-shadow: 0 8px 25px rgba(0, 0, 0, 0.1);
+    }
+    
+    .route-node {
+        background: white;
         padding: 1rem;
-        border-radius: 0.5rem;
-        margin: 1rem 0;
-    }
-    .error-box {
-        background-color: #f8d7da;
-        border: 1px solid #f5c6cb;
-        color: #721c24;
-        padding: 1rem;
-        border-radius: 0.5rem;
-        margin: 1rem 0;
-    }
-    .category-info {
-        background-color: #e8f4f8;
-        padding: 1rem;
-        border-radius: 0.5rem;
-        margin: 1rem 0;
-        border-left: 4px solid #1f77b4;
-    }
-    .priority-config {
-        background-color: #f8f9fa;
-        padding: 1rem;
-        border-radius: 0.5rem;
-        margin: 1rem 0;
-        border: 1px solid #dee2e6;
-    }
-    .column-selector {
-        background-color: #fff;
-        padding: 0.5rem;
-        border-radius: 0.3rem;
+        border-radius: 8px;
         margin: 0.5rem 0;
+        border-left: 4px solid;
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
+        transition: transform 0.2s ease;
     }
+    
+    .route-node:hover {
+        transform: translateX(4px);
+    }
+    
+    .route-level-0 { border-left-color: #ef4444; }
+    .route-level-1 { border-left-color: #f97316; }
+    .route-level-2 { border-left-color: #eab308; }
+    .route-level-3 { border-left-color: #22c55e; }
+    .route-level-4 { border-left-color: #3b82f6; }
+    .route-level-5 { border-left-color: #8b5cf6; }
 </style>
 """, unsafe_allow_html=True)
 
-class DynamicCategoryDetector:
-    """Automatically detect and categorize pages based on URL patterns, content, and structure"""
+class AdvancedCategoryDetector:
+    """Enhanced category detector with business value insights"""
     
     def __init__(self):
         self.business_keywords = {
@@ -119,7 +307,7 @@ class DynamicCategoryDetector:
             'user': ['login', 'register', 'signup', 'account', 'profile', 'dashboard'],
             'category': ['category', 'categories', 'tag', 'tags', 'topic', 'topics'],
             'search': ['search', 'results', 'find', 'query'],
-            'finance': ['loans', 'mortgage', 'credit', 'banking', 'finance', 'investment', 'insurance'],
+            'finance': ['loans', 'loan', 'mortgage', 'credit', 'banking', 'finance', 'investment', 'insurance', 'savings'],
             'healthcare': ['health', 'medical', 'doctor', 'hospital', 'clinic', 'treatment'],
             'education': ['course', 'education', 'learn', 'training', 'tutorial', 'class'],
             'technology': ['software', 'app', 'tech', 'digital', 'cloud', 'api', 'development'],
@@ -128,172 +316,884 @@ class DynamicCategoryDetector:
             'automotive': ['car', 'auto', 'vehicle', 'parts', 'repair', 'dealer'],
             'travel': ['travel', 'hotel', 'flight', 'booking', 'destination', 'tour'],
             'food': ['restaurant', 'food', 'menu', 'recipe', 'cooking', 'dining'],
-            'entertainment': ['movie', 'music', 'game', 'entertainment', 'show', 'event']
+            'entertainment': ['movie', 'music', 'game', 'entertainment', 'show', 'event'],
+            'institution': ['institution', 'bank', 'university', 'school', 'hospital', 'government'],
+            'author': ['author', 'writer', 'journalist', 'contributor', 'expert']
         }
         
-        self.url_patterns = {}
-        self.discovered_categories = set()
-        self.category_keywords = {}
-        
-    def analyze_url_structure(self, urls):
-        """Analyze URL structure to identify patterns and categories"""
-        url_segments = []
-        
-        for url in urls:
-            parsed = urlparse(url)
-            path = parsed.path.strip('/')
-            
-            if path:
-                segments = [seg for seg in path.split('/') if seg and not seg.isdigit()]
-                url_segments.extend(segments)
-        
-        # Count segment frequency
-        segment_counts = Counter(url_segments)
-        common_segments = [seg for seg, count in segment_counts.items() if count >= 2]
-        
-        return common_segments
-    
-    def extract_content_keywords(self, page_data):
-        """Extract keywords from page content for better categorization"""
-        all_text = []
-        
-        for url, data in page_data.items():
-            if data.get('title'):
-                all_text.append(data['title'])
-            if data.get('meta_description'):
-                all_text.append(data['meta_description'])
-            if data.get('h1'):
-                all_text.append(data['h1'])
-        
-        # Use TF-IDF to find important terms
-        if all_text:
-            try:
-                vectorizer = TfidfVectorizer(max_features=50, stop_words='english', min_df=2)
-                tfidf_matrix = vectorizer.fit_transform(all_text)
-                feature_names = vectorizer.get_feature_names_out()
-                
-                # Get top terms
-                mean_scores = np.mean(tfidf_matrix.toarray(), axis=0)
-                top_terms = [feature_names[i] for i in mean_scores.argsort()[-20:][::-1]]
-                
-                return top_terms
-            except:
-                return []
-        
-        return []
-    
+        # Business value mapping
+        self.business_value = {
+            'high': ['product', 'service', 'finance', 'ecommerce', 'homepage', 'real_estate', 'automotive', 'institution'],
+            'medium': ['content', 'company', 'education', 'technology', 'healthcare', 'author'],
+            'low': ['category', 'tag', 'search', 'legal', 'help', 'user', 'contact']
+        }
+
+    @lru_cache(maxsize=2000)
     def categorize_url(self, url, title="", meta_desc="", h1=""):
-        """Dynamically categorize a URL based on patterns and content"""
+        """Enhanced URL categorization with business value assessment"""
         parsed = urlparse(url)
         path = parsed.path.lower()
         
-        # Combine all text for analysis
-        full_text = f"{path} {title} {meta_desc} {h1}".lower()
+        # Combine text for analysis
+        full_text = f"{path} {title[:200]} {meta_desc[:200]} {h1[:100]}".lower()
         
         # Check against business keywords
         category_scores = {}
-        
         for category, keywords in self.business_keywords.items():
             score = sum(1 for keyword in keywords if keyword in full_text)
             if score > 0:
                 category_scores[category] = score
         
-        # Check URL patterns
+        # URL pattern analysis
         path_segments = [seg for seg in path.split('/') if seg]
         
-        # Special handling for homepage
         if path in ['/', ''] or len(path_segments) == 0:
             return 'homepage'
         
-        # Check for common patterns
+        # Enhanced pattern matching
+        if 'tag' in path or 'tags' in path:
+            return 'tag'
+        if 'category' in path or 'categories' in path:
+            return 'category'
+        if 'author' in path or 'writer' in path:
+            return 'author'
+        if 'news' in path or 'blog' in path or 'article' in path:
+            return 'content'
+        if 'loan' in path or 'finance' in path or 'bank' in path:
+            return 'finance'
+        if 'institution' in path or 'university' in path:
+            return 'institution'
+        
         first_segment = path_segments[0] if path_segments else ''
         
-        # Dynamic category detection based on URL structure
-        if first_segment:
-            # Check if this segment appears frequently (indicating a category)
-            if first_segment in self.url_patterns:
-                self.url_patterns[first_segment] += 1
-            else:
-                self.url_patterns[first_segment] = 1
-        
-        # Return best matching category
         if category_scores:
-            best_category = max(category_scores.items(), key=lambda x: x[1])[0]
-            return best_category
+            return max(category_scores.items(), key=lambda x: x[1])[0]
         
-        # If no match, use first URL segment as category
         return first_segment if first_segment else 'other'
     
-    def auto_detect_categories(self, page_data):
-        """Automatically detect website categories based on crawled data"""
-        urls = list(page_data.keys())
+    def get_business_value(self, category):
+        """Get business value for a category"""
+        for value_level, categories in self.business_value.items():
+            if category in categories:
+                return value_level
+        return 'medium'
+
+class InternalRouteMapper:
+    """Advanced internal route mapping and visualization"""
+    
+    def __init__(self):
+        self.route_tree = {}
+        self.page_hierarchy = defaultdict(list)
+        self.breadcrumb_paths = {}
         
-        # Analyze URL structure
-        common_segments = self.analyze_url_structure(urls)
+    def build_route_tree(self, urls, pagerank_scores, section_mapping):
+        """Build comprehensive route tree structure"""
+        routes = {}
         
-        # Extract content keywords
-        content_keywords = self.extract_content_keywords(page_data)
+        for url in urls:
+            parsed = urlparse(url)
+            path = parsed.path.strip('/')
+            
+            if not path:
+                routes['/'] = {
+                    'url': url,
+                    'level': 0,
+                    'segments': [],
+                    'pagerank': pagerank_scores.get(url, 0),
+                    'section': section_mapping.get(url, 'other'),
+                    'children': []
+                }
+                continue
+                
+            segments = [seg for seg in path.split('/') if seg]
+            
+            # Build hierarchical structure
+            current_path = ''
+            for i, segment in enumerate(segments):
+                current_path += '/' + segment
+                
+                if current_path not in routes:
+                    routes[current_path] = {
+                        'url': url if i == len(segments) - 1 else '',
+                        'level': i + 1,
+                        'segments': segments[:i+1],
+                        'pagerank': pagerank_scores.get(url, 0) if i == len(segments) - 1 else 0,
+                        'section': section_mapping.get(url, 'other') if i == len(segments) - 1 else 'navigation',
+                        'children': [],
+                        'parent': '/'.join(segments[:i]) if i > 0 else '/'
+                    }
         
-        # Categorize all pages
-        categorized_pages = {}
-        category_counts = Counter()
+        # Build parent-child relationships
+        for path, data in routes.items():
+            if data['level'] > 0:
+                parent_path = '/' + '/'.join(data['segments'][:-1]) if len(data['segments']) > 1 else '/'
+                if parent_path in routes:
+                    routes[parent_path]['children'].append(path)
         
-        for url, data in page_data.items():
-            category = self.categorize_url(
-                url,
-                data.get('title', ''),
-                data.get('meta_description', ''),
-                data.get('h1', '')
+        return routes
+    
+    def generate_breadcrumb_analysis(self, routes):
+        """Generate breadcrumb analysis for SEO insights"""
+        breadcrumb_analysis = {}
+        
+        for path, data in routes.items():
+            if data['url']:  # Only for actual pages
+                breadcrumbs = []
+                current_segments = data['segments']
+                
+                for i in range(len(current_segments)):
+                    segment_path = '/' + '/'.join(current_segments[:i+1])
+                    if segment_path in routes:
+                        breadcrumbs.append({
+                            'segment': current_segments[i],
+                            'path': segment_path,
+                            'level': i + 1
+                        })
+                
+                breadcrumb_analysis[data['url']] = {
+                    'breadcrumbs': breadcrumbs,
+                    'depth': len(breadcrumbs),
+                    'pagerank': data['pagerank'],
+                    'section': data['section']
+                }
+        
+        return breadcrumb_analysis
+
+class AdvancedPageRankAnalyzer:
+    """Enhanced PageRank analyzer with AI insights and route mapping"""
+    
+    def __init__(self, openai_api_key=None):
+        self.openai_client = OpenAI(api_key=openai_api_key) if openai_api_key else None
+        self.graph = nx.DiGraph()
+        self.pagerank_scores = {}
+        self.page_data = {}
+        self.section_mapping = {}
+        self.anchor_texts = defaultdict(Counter)
+        self.category_detector = AdvancedCategoryDetector()
+        self.route_mapper = InternalRouteMapper()
+        self.crawl_stats = {
+            'pages_crawled': 0,
+            'errors': 0,
+            'start_time': None,
+            'end_time': None
+        }
+        
+    def crawl_website(self, seed_url, max_pages=5000, depth=3, delay=0.1):
+        """Enhanced website crawler with route tracking"""
+        visited = set()
+        to_visit = [seed_url]
+        
+        session = requests.Session()
+        session.headers.update({
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+        })
+        
+        self.crawl_stats['start_time'] = datetime.now()
+        
+        # Enhanced progress tracking
+        progress_container = st.container()
+        with progress_container:
+            st.markdown('<div class="progress-container">', unsafe_allow_html=True)
+            
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                progress_bar = st.progress(0)
+                status_text = st.empty()
+            with col2:
+                stats_text = st.empty()
+            with col3:
+                route_preview = st.empty()
+            
+            st.markdown('</div>', unsafe_allow_html=True)
+        
+        routes_discovered = set()
+        
+        while to_visit and len(visited) < max_pages:
+            current_url = to_visit.pop(0)
+            
+            if current_url in visited:
+                continue
+                
+            try:
+                # Update progress with enhanced visuals
+                progress = len(visited) / max_pages
+                progress_bar.progress(min(progress, 1.0))
+                
+                elapsed_time = (datetime.now() - self.crawl_stats['start_time']).total_seconds()
+                pages_per_second = len(visited) / elapsed_time if elapsed_time > 0 else 0
+                
+                status_text.markdown(f"""
+                **🕷️ Crawling Progress**
+                - **Current:** `{current_url[:50]}...`
+                - **Progress:** {len(visited)}/{max_pages} pages
+                - **Queue:** {len(to_visit)} pages
+                """)
+                
+                stats_text.markdown(f"""
+                **📊 Live Statistics**
+                - **Speed:** {pages_per_second:.1f} pages/sec
+                - **Errors:** {self.crawl_stats['errors']}
+                - **Time:** {elapsed_time:.0f}s
+                """)
+                
+                # Track routes discovered
+                route = urlparse(current_url).path
+                if route not in routes_discovered:
+                    routes_discovered.add(route)
+                    
+                route_preview.markdown(f"""
+                **🗺️ Routes Discovered**
+                - **Total Routes:** {len(routes_discovered)}
+                - **Latest:** `{route}`
+                - **Depth:** {len([seg for seg in route.split('/') if seg])}
+                """)
+                
+                # Make request
+                response = session.get(current_url, timeout=10)
+                
+                if 'text/html' not in response.headers.get('content-type', '').lower():
+                    continue
+                
+                soup = BeautifulSoup(response.text, 'html.parser')
+                
+                # Extract comprehensive page data
+                title = soup.title.string.strip() if soup.title else ''
+                h1 = soup.h1.get_text().strip() if soup.h1 else ''
+                
+                # Extract meta description
+                meta_desc = ''
+                meta_tag = soup.find('meta', attrs={'name': 'description'})
+                if meta_tag:
+                    meta_desc = meta_tag.get('content', '')
+                
+                # Extract structured data
+                structured_data = []
+                for script in soup.find_all('script', type='application/ld+json'):
+                    try:
+                        data = json.loads(script.string)
+                        structured_data.append(data)
+                    except:
+                        continue
+                
+                self.page_data[current_url] = {
+                    'title': title,
+                    'h1': h1,
+                    'meta_description': meta_desc,
+                    'word_count': len(soup.get_text().split()),
+                    'status_code': response.status_code,
+                    'internal_links': 0,
+                    'external_links': 0,
+                    'outbound_pages': [],
+                    'structured_data': structured_data,
+                    'route_depth': len([seg for seg in urlparse(current_url).path.split('/') if seg])
+                }
+                
+                # Extract links with detailed analysis
+                internal_links = 0
+                external_links = 0
+                new_urls = []
+                
+                for link in soup.find_all('a', href=True):
+                    href = link.get('href', '').strip()
+                    if not href or href.startswith(('#', 'mailto:', 'tel:', 'javascript:')):
+                        continue
+                    
+                    try:
+                        full_url = urljoin(current_url, href).split('#')[0]
+                        
+                        if self._is_internal_link(full_url, seed_url):
+                            internal_links += 1
+                            self.graph.add_edge(current_url, full_url)
+                            
+                            # Store outbound page relationship
+                            self.page_data[current_url]['outbound_pages'].append(full_url)
+                            
+                            # Extract and analyze anchor text
+                            anchor_text = link.get_text().strip()
+                            if anchor_text:
+                                self.anchor_texts[full_url][anchor_text] += 1
+                            
+                            # Add to crawl queue
+                            if (full_url not in visited and 
+                                full_url not in to_visit and 
+                                full_url not in new_urls and
+                                len(visited) + len(to_visit) < max_pages):
+                                new_urls.append(full_url)
+                        else:
+                            external_links += 1
+                            
+                    except Exception:
+                        continue
+                
+                to_visit.extend(new_urls[:30])
+                
+                self.page_data[current_url]['internal_links'] = internal_links
+                self.page_data[current_url]['external_links'] = external_links
+                
+                visited.add(current_url)
+                self.crawl_stats['pages_crawled'] = len(visited)
+                
+                time.sleep(delay)
+                
+            except Exception as e:
+                self.crawl_stats['errors'] += 1
+                continue
+        
+        progress_bar.progress(1.0)
+        self.crawl_stats['end_time'] = datetime.now()
+        
+        total_time = (self.crawl_stats['end_time'] - self.crawl_stats['start_time']).total_seconds()
+        status_text.markdown(f"""
+        **✅ Crawling Completed!**
+        - **Total Pages:** {len(visited)}
+        - **Total Routes:** {len(routes_discovered)}
+        - **Total Links:** {len(self.graph.edges())}
+        - **Time:** {total_time:.1f} seconds
+        """)
+        
+        return visited
+    
+    def _is_internal_link(self, url, seed_url):
+        """Check if URL is internal"""
+        try:
+            return urlparse(url).netloc == urlparse(seed_url).netloc
+        except:
+            return False
+    
+    def calculate_pagerank(self, alpha=0.85, max_iter=100):
+        """Calculate PageRank with enhanced analytics"""
+        if len(self.graph.nodes()) == 0:
+            st.error("No pages to analyze")
+            return {}
+        
+        with st.spinner("🧮 Calculating PageRank scores..."):
+            try:
+                self.pagerank_scores = nx.pagerank(
+                    self.graph, 
+                    alpha=alpha, 
+                    max_iter=max_iter,
+                    tol=1e-6
+                )
+                
+                # Normalize scores
+                total_score = sum(self.pagerank_scores.values())
+                if total_score > 0:
+                    self.pagerank_scores = {
+                        url: score/total_score 
+                        for url, score in self.pagerank_scores.items()
+                    }
+                
+                st.success(f"✅ PageRank calculated for {len(self.pagerank_scores)} pages")
+                
+            except Exception as e:
+                st.error(f"Error calculating PageRank: {str(e)}")
+                num_pages = len(self.graph.nodes())
+                self.pagerank_scores = {node: 1.0/num_pages for node in self.graph.nodes()}
+        
+        return self.pagerank_scores
+    
+    def detect_sections(self, urls):
+        """Enhanced section detection"""
+        section_patterns = {}
+        
+        for url in urls:
+            page_info = self.page_data.get(url, {})
+            title = page_info.get('title', '')
+            meta_desc = page_info.get('meta_description', '')
+            h1 = page_info.get('h1', '')
+            
+            category = self.category_detector.categorize_url(url, title, meta_desc, h1)
+            section_patterns[url] = category
+        
+        return section_patterns
+    
+    def generate_ai_recommendations(self, analysis_data):
+        """Generate comprehensive AI-powered recommendations"""
+        if not self.openai_client:
+            return "OpenAI API key not provided. Please add your API key for AI recommendations."
+        
+        try:
+            prompt = f"""
+            As a senior SEO strategist, analyze this comprehensive PageRank data and provide strategic recommendations:
+            
+            **Website Overview:**
+            - Total pages analyzed: {analysis_data.get('total_pages', 0)}
+            - Total internal links: {analysis_data.get('total_links', 0)}
+            - Sections identified: {len(analysis_data.get('sections', []))}
+            
+            **PageRank Distribution:**
+            - Top sections: {analysis_data.get('top_sections', [])[:5]}
+            - Top pages: {len(analysis_data.get('top_pages', []))} analyzed
+            - Business value distribution: {analysis_data.get('business_distribution', {})}
+            
+            **Key Issues Identified:**
+            - PageRank waste: {analysis_data.get('waste_percentage', 0):.1f}% in low-value sections
+            - Priority page alignment: {analysis_data.get('priority_alignment', 'Not provided')}
+            - Internal linking opportunities: {len(analysis_data.get('linking_opportunities', []))}
+            
+            **Route Structure:**
+            - Route depth analysis: {analysis_data.get('route_depth_stats', {})}
+            - Navigation efficiency: {analysis_data.get('navigation_efficiency', 'Unknown')}
+            
+            Please provide:
+            
+            1. **Immediate Action Items** (0-2 weeks):
+               - Specific high-impact changes
+               - Quick wins for PageRank redistribution
+               - Critical technical fixes
+            
+            2. **Strategic Optimizations** (1-3 months):
+               - Internal linking strategy overhaul
+               - Content architecture improvements
+               - Section priority rebalancing
+            
+            3. **Long-term Vision** (3-12 months):
+               - Site structure evolution
+               - Authority flow optimization
+               - Competitive advantage development
+            
+            4. **Technical Implementation**:
+               - Specific code/CMS changes needed
+               - Tools and monitoring setup
+               - Success metrics to track
+            
+            5. **Expected Impact Quantification**:
+               - Projected PageRank improvements
+               - SEO performance uplift estimates
+               - Business value creation potential
+            
+            Make recommendations specific, actionable, and prioritized by impact vs. effort.
+            """
+            
+            response = self.openai_client.chat.completions.create(
+                model="gpt-4",
+                messages=[
+                    {"role": "system", "content": "You are a world-class SEO strategist with deep expertise in technical SEO, internal linking, and PageRank optimization. Provide detailed, actionable, and prioritized recommendations that drive real business results."},
+                    {"role": "user", "content": prompt}
+                ],
+                max_tokens=2500,
+                temperature=0.7
             )
             
-            categorized_pages[url] = category
-            category_counts[category] += 1
+            return response.choices[0].message.content
         
-        # Store discovered categories
-        self.discovered_categories = set(category_counts.keys())
-        
-        return categorized_pages, category_counts, common_segments, content_keywords
+        except Exception as e:
+            return f"Error generating AI recommendations: {str(e)}"
+
+def create_stunning_visualizations(analyzer, insights):
+    """Create beautiful, interactive visualizations"""
     
-    def get_business_value_mapping(self, categories, priority_pages_df=None):
-        """Determine business value for each category"""
-        business_value_mapping = {}
+    # 1. Advanced Section PageRank Sunburst
+    section_data = []
+    for url, section in analyzer.section_mapping.items():
+        pr_score = analyzer.pagerank_scores.get(url, 0)
+        business_value = analyzer.category_detector.get_business_value(section)
         
-        # High value categories (business/revenue focused)
-        high_value_indicators = [
-            'product', 'service', 'finance', 'ecommerce', 'homepage',
-            'real_estate', 'automotive', 'healthcare', 'education'
-        ]
+        section_data.append({
+            'section': section,
+            'url': url,
+            'pagerank': pr_score,
+            'business_value': business_value,
+            'route_depth': analyzer.page_data.get(url, {}).get('route_depth', 0)
+        })
+    
+    df_sections = pd.DataFrame(section_data)
+    
+    # Sunburst chart for hierarchical view
+    fig_sunburst = px.sunburst(
+        df_sections.groupby(['business_value', 'section']).agg({
+            'pagerank': 'sum',
+            'url': 'count'
+        }).reset_index(),
+        path=['business_value', 'section'],
+        values='pagerank',
+        color='pagerank',
+        color_continuous_scale='RdYlBu_r',
+        title='🌅 PageRank Distribution Hierarchy (Business Value → Sections)'
+    )
+    
+    fig_sunburst.update_layout(
+        height=600,
+        font=dict(size=14),
+        title_font_size=20
+    )
+    
+    # 2. 3D Network Visualization
+    top_pages = sorted(analyzer.pagerank_scores.items(), key=lambda x: x[1], reverse=True)[:30]
+    top_urls = [url for url, _ in top_pages]
+    
+    subgraph = analyzer.graph.subgraph(top_urls)
+    
+    if len(subgraph.nodes()) > 0:
+        # Use 3D spring layout
+        pos = nx.spring_layout(subgraph, k=2, iterations=50, dim=3)
         
-        # Low value categories (non-commercial)
-        low_value_indicators = [
-            'content', 'legal', 'help', 'category', 'search', 'user',
-            'contact', 'company', 'entertainment'
-        ]
+        # Extract coordinates
+        node_x = [pos[node][0] for node in subgraph.nodes()]
+        node_y = [pos[node][1] for node in subgraph.nodes()]
+        node_z = [pos[node][2] for node in subgraph.nodes()]
         
-        # Check priority pages if available
-        priority_categories = set()
-        if priority_pages_df is not None and not priority_pages_df.empty:
-            for _, row in priority_pages_df.iterrows():
-                url = row.get('Hub URL', '')
-                if url:
-                    category = self.categorize_url(url)
-                    priority_categories.add(category)
+        # Create edge traces
+        edge_traces = []
+        for edge in subgraph.edges():
+            x0, y0, z0 = pos[edge[0]]
+            x1, y1, z1 = pos[edge[1]]
+            edge_traces.append(go.Scatter3d(
+                x=[x0, x1, None],
+                y=[y0, y1, None],
+                z=[z0, z1, None],
+                mode='lines',
+                line=dict(color='rgba(125, 125, 125, 0.4)', width=2),
+                hoverinfo='none',
+                showlegend=False
+            ))
         
-        for category in categories:
-            if category in priority_categories:
-                business_value_mapping[category] = 'High Business Value'
-            elif any(indicator in category.lower() for indicator in high_value_indicators):
-                business_value_mapping[category] = 'High Business Value'
-            elif any(indicator in category.lower() for indicator in low_value_indicators):
-                business_value_mapping[category] = 'Low Business Value'
+        # Create node trace
+        node_colors = []
+        node_sizes = []
+        node_texts = []
+        
+        for node in subgraph.nodes():
+            pr_score = analyzer.pagerank_scores.get(node, 0)
+            section = analyzer.section_mapping.get(node, 'other')
+            business_value = analyzer.category_detector.get_business_value(section)
+            
+            # Color by business value
+            if business_value == 'high':
+                node_colors.append('#22c55e')
+            elif business_value == 'medium':
+                node_colors.append('#f59e0b')
             else:
-                business_value_mapping[category] = 'Medium Business Value'
+                node_colors.append('#ef4444')
+            
+            node_sizes.append(max(8, pr_score * 1000))
+            
+            title = analyzer.page_data.get(node, {}).get('title', '')
+            node_texts.append(f"{title[:30]}...<br>PR: {pr_score:.4f}<br>Section: {section}")
         
-        return business_value_mapping
+        node_trace = go.Scatter3d(
+            x=node_x,
+            y=node_y,
+            z=node_z,
+            mode='markers',
+            marker=dict(
+                size=node_sizes,
+                color=node_colors,
+                opacity=0.8,
+                line=dict(width=2, color='white')
+            ),
+            text=node_texts,
+            hoverinfo='text',
+            name='Pages'
+        )
+        
+        fig_3d_network = go.Figure(data=[node_trace] + edge_traces)
+        fig_3d_network.update_layout(
+            title='🌐 3D PageRank Flow Network (Green=High Value, Yellow=Medium, Red=Low)',
+            scene=dict(
+                xaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
+                yaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
+                zaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
+                bgcolor='rgba(0,0,0,0)'
+            ),
+            height=700
+        )
+    else:
+        fig_3d_network = go.Figure()
+    
+    # 3. Advanced Sankey with Business Value Flow
+    section_links = defaultdict(lambda: defaultdict(int))
+    for source, target in analyzer.graph.edges():
+        source_section = analyzer.section_mapping.get(source, 'other')
+        target_section = analyzer.section_mapping.get(target, 'other')
+        section_links[source_section][target_section] += 1
+    
+    # Prepare Sankey data with business value
+    sections = list(set(analyzer.section_mapping.values()))
+    node_labels = []
+    node_colors = []
+    
+    for section in sections:
+        business_value = analyzer.category_detector.get_business_value(section)
+        section_pr = sum(analyzer.pagerank_scores.get(url, 0) for url, sec in analyzer.section_mapping.items() if sec == section)
+        
+        node_labels.append(f"{section.title()}<br>PR: {section_pr:.3f}<br>Value: {business_value.title()}")
+        
+        if business_value == 'high':
+            node_colors.append('rgba(34, 197, 94, 0.8)')
+        elif business_value == 'medium':
+            node_colors.append('rgba(245, 158, 11, 0.8)')
+        else:
+            node_colors.append('rgba(239, 68, 68, 0.8)')
+    
+    # Create links
+    source_indices = []
+    target_indices = []
+    link_values = []
+    link_colors = []
+    
+    for source_section, targets in section_links.items():
+        if source_section in sections:
+            source_idx = sections.index(source_section)
+            source_value = analyzer.category_detector.get_business_value(source_section)
+            
+            for target_section, count in targets.items():
+                if source_section != target_section and target_section in sections and count > 0:
+                    target_idx = sections.index(target_section)
+                    target_value = analyzer.category_detector.get_business_value(target_section)
+                    
+                    source_indices.append(source_idx)
+                    target_indices.append(target_idx)
+                    link_values.append(count)
+                    
+                    # Color links based on business value flow
+                    if source_value == 'low' and target_value == 'high':
+                        link_colors.append('rgba(34, 197, 94, 0.6)')  # Good flow (green)
+                    elif source_value == 'high' and target_value == 'low':
+                        link_colors.append('rgba(239, 68, 68, 0.6)')  # Bad flow (red)
+                    elif source_value == 'medium':
+                        link_colors.append('rgba(245, 158, 11, 0.4)')  # Neutral (yellow)
+                    else:
+                        link_colors.append('rgba(148, 163, 184, 0.4)')  # Other (gray)
+    
+    if source_indices:
+        fig_sankey = go.Figure(data=[go.Sankey(
+            arrangement='snap',
+            node=dict(
+                pad=20,
+                thickness=25,
+                line=dict(color="black", width=0.5),
+                label=node_labels,
+                color=node_colors
+            ),
+            link=dict(
+                source=source_indices,
+                target=target_indices,
+                value=link_values,
+                color=link_colors
+            )
+        )])
+        
+        fig_sankey.update_layout(
+            title="🔄 Advanced Section Flow Analysis (Green=Good Flow, Red=PageRank Waste)",
+            height=700,
+            font_size=12
+        )
+    else:
+        fig_sankey = go.Figure()
+    
+    # 4. Route Depth Analysis
+    route_depths = defaultdict(list)
+    for url, data in analyzer.page_data.items():
+        depth = data.get('route_depth', 0)
+        pr_score = analyzer.pagerank_scores.get(url, 0)
+        route_depths[depth].append(pr_score)
+    
+    depth_analysis = []
+    for depth, pr_scores in route_depths.items():
+        depth_analysis.append({
+            'depth': depth,
+            'avg_pagerank': np.mean(pr_scores),
+            'total_pagerank': sum(pr_scores),
+            'page_count': len(pr_scores),
+            'max_pagerank': max(pr_scores) if pr_scores else 0
+        })
+    
+    df_depth = pd.DataFrame(depth_analysis)
+    
+    fig_depth = make_subplots(
+        rows=2, cols=2,
+        subplot_titles=('PageRank by Route Depth', 'Page Count by Depth', 
+                       'Total PageRank by Depth', 'Max PageRank by Depth'),
+        specs=[[{"secondary_y": False}, {"secondary_y": False}],
+               [{"secondary_y": False}, {"secondary_y": False}]]
+    )
+    
+    # Add traces
+    fig_depth.add_trace(
+        go.Scatter(x=df_depth['depth'], y=df_depth['avg_pagerank'], 
+                  mode='lines+markers', name='Avg PageRank',
+                  line=dict(color='#3b82f6', width=3)),
+        row=1, col=1
+    )
+    
+    fig_depth.add_trace(
+        go.Bar(x=df_depth['depth'], y=df_depth['page_count'], 
+               name='Page Count', marker_color='#10b981'),
+        row=1, col=2
+    )
+    
+    fig_depth.add_trace(
+        go.Scatter(x=df_depth['depth'], y=df_depth['total_pagerank'], 
+                  mode='lines+markers', name='Total PageRank',
+                  line=dict(color='#f59e0b', width=3)),
+        row=2, col=1
+    )
+    
+    fig_depth.add_trace(
+        go.Scatter(x=df_depth['depth'], y=df_depth['max_pagerank'], 
+                  mode='lines+markers', name='Max PageRank',
+                  line=dict(color='#ef4444', width=3)),
+        row=2, col=2
+    )
+    
+    fig_depth.update_layout(
+        title_text="📊 Route Depth Analysis Dashboard",
+        height=600,
+        showlegend=False
+    )
+    
+    return {
+        'sunburst': fig_sunburst,
+        'network_3d': fig_3d_network,
+        'sankey': fig_sankey,
+        'depth_analysis': fig_depth
+    }
+
+def create_route_visualization(analyzer):
+    """Create comprehensive internal route visualization"""
+    
+    # Build route tree
+    routes = analyzer.route_mapper.build_route_tree(
+        list(analyzer.pagerank_scores.keys()),
+        analyzer.pagerank_scores,
+        analyzer.section_mapping
+    )
+    
+    # Create hierarchical route display
+    st.markdown("### 🗺️ Complete Internal Route Map")
+    
+    # Group routes by depth
+    routes_by_depth = defaultdict(list)
+    for path, data in routes.items():
+        routes_by_depth[data['level']].append((path, data))
+    
+    # Display routes in collapsible sections
+    for depth in sorted(routes_by_depth.keys()):
+        routes_at_depth = routes_by_depth[depth]
+        
+        with st.expander(f"📁 Level {depth} Routes ({len(routes_at_depth)} routes)", expanded=(depth <= 2)):
+            
+            # Sort by PageRank for this depth
+            routes_at_depth.sort(key=lambda x: x[1]['pagerank'], reverse=True)
+            
+            cols = st.columns(min(3, len(routes_at_depth)))
+            
+            for i, (path, data) in enumerate(routes_at_depth):
+                col_idx = i % len(cols)
+                
+                with cols[col_idx]:
+                    # Determine card color based on business value
+                    if data['url']:
+                        business_value = analyzer.category_detector.get_business_value(data['section'])
+                        if business_value == 'high':
+                            card_class = "success-card"
+                        elif business_value == 'medium':
+                            card_class = "warning-card"
+                        else:
+                            card_class = "critical-card"
+                    else:
+                        card_class = "insight-card"
+                    
+                    # Get page title if available
+                    title = "Navigation Path"
+                    if data['url']:
+                        page_data = analyzer.page_data.get(data['url'], {})
+                        title = page_data.get('title', 'Untitled Page')[:50]
+                        if len(page_data.get('title', '')) > 50:
+                            title += "..."
+                    
+                    st.markdown(f"""
+                    <div class="{card_class}">
+                        <h4>🔗 {title}</h4>
+                        <p><strong>Route:</strong> <code>{path}</code></p>
+                        <p><strong>Level:</strong> {data['level']}</p>
+                        <p><strong>Section:</strong> {data['section']}</p>
+                        <p><strong>PageRank:</strong> {data['pagerank']:.6f}</p>
+                        {f"<p><strong>URL:</strong> <code>{data['url'][:60]}...</code></p>" if data['url'] else ""}
+                    </div>
+                    """, unsafe_allow_html=True)
+    
+    # Route statistics
+    st.markdown("### 📊 Route Statistics")
+    
+    col1, col2, col3, col4 = st.columns(4)
+    
+    with col1:
+        total_routes = len(routes)
+        st.markdown(f"""
+        <div class="metric-card">
+            <h3>🗂️ Total Routes</h3>
+            <h2>{total_routes}</h2>
+            <p>Unique paths discovered</p>
+        </div>
+        """, unsafe_allow_html=True)
+    
+    with col2:
+        max_depth = max(data['level'] for data in routes.values()) if routes else 0
+        st.markdown(f"""
+        <div class="metric-card">
+            <h3>📏 Max Depth</h3>
+            <h2>{max_depth}</h2>
+            <p>Deepest route level</p>
+        </div>
+        """, unsafe_allow_html=True)
+    
+    with col3:
+        avg_depth = np.mean([data['level'] for data in routes.values()]) if routes else 0
+        st.markdown(f"""
+        <div class="metric-card">
+            <h3>📊 Avg Depth</h3>
+            <h2>{avg_depth:.1f}</h2>
+            <p>Average route level</p>
+        </div>
+        """, unsafe_allow_html=True)
+    
+    with col4:
+        orphaned_routes = sum(1 for data in routes.values() if data['url'] and data['pagerank'] == 0)
+        st.markdown(f"""
+        <div class="metric-card">
+            <h3>🏝️ Orphaned</h3>
+            <h2>{orphaned_routes}</h2>
+            <p>Routes with no PageRank</p>
+        </div>
+        """, unsafe_allow_html=True)
+    
+    # Interactive route tree visualization
+    st.markdown("### 🌳 Interactive Route Tree")
+    
+    # Create tree structure for visualization
+    tree_data = []
+    for path, data in routes.items():
+        if data['level'] <= 3:  # Limit depth for visualization
+            tree_data.append({
+                'id': path,
+                'parent': data.get('parent', ''),
+                'value': data['pagerank'] * 1000 if data['pagerank'] > 0 else 1,
+                'label': f"{path.split('/')[-1] or 'Home'}<br>PR: {data['pagerank']:.4f}"
+            })
+    
+    if tree_data:
+        fig_treemap = go.Figure(go.Treemap(
+            ids=[item['id'] for item in tree_data],
+            labels=[item['label'] for item in tree_data],
+            parents=[item['parent'] for item in tree_data],
+            values=[item['value'] for item in tree_data],
+            textinfo="label",
+            pathbar_thickness=20,
+            maxdepth=4
+        ))
+        
+        fig_treemap.update_layout(
+            title="🗺️ Route Structure Treemap (Size = PageRank)",
+            height=600
+        )
+        
+        st.plotly_chart(fig_treemap, use_container_width=True)
 
 def handle_priority_pages_upload():
-    """Handle priority pages CSV upload with column selection"""
-    st.subheader("📁 Priority Pages Configuration")
+    """Enhanced priority pages upload with validation"""
+    st.markdown("### 📁 Priority Pages Configuration")
     
     uploaded_file = st.file_uploader(
         "Upload Priority Pages CSV",
@@ -303,1289 +1203,755 @@ def handle_priority_pages_upload():
     
     if uploaded_file is not None:
         try:
-            # Read the CSV file
             df = pd.read_csv(uploaded_file)
-            
             st.success(f"✅ File uploaded successfully! Found {len(df)} rows and {len(df.columns)} columns.")
             
-            # Show file preview
-            st.markdown("**File Preview:**")
+            # Show file preview with enhanced styling
+            st.markdown("**📊 File Preview:**")
             st.dataframe(df.head(), use_container_width=True)
             
             # Column selection interface
-            st.markdown('<div class="priority-config">', unsafe_allow_html=True)
-            st.markdown("### 🎯 Configure Priority Pages Columns")
-            
-            col1, col2, col3 = st.columns(3)
+            st.markdown("**🔧 Column Mapping:**")
+            col1, col2 = st.columns(2)
             
             with col1:
-                st.markdown('<div class="column-selector">', unsafe_allow_html=True)
-                st.markdown("**Select URL Column:**")
                 url_column = st.selectbox(
-                    "Choose the column containing page URLs",
+                    "Select URL Column",
                     options=df.columns.tolist(),
-                    help="Select the column that contains the full URLs of your priority pages"
+                    help="Column containing the URLs of your priority pages"
                 )
-                st.markdown('</div>', unsafe_allow_html=True)
             
             with col2:
-                st.markdown('<div class="column-selector">', unsafe_allow_html=True)
-                st.markdown("**Select Target Keywords Column:**")
                 keyword_column = st.selectbox(
-                    "Choose the column containing target keywords",
+                    "Select Keywords Column (Optional)",
                     options=['None'] + df.columns.tolist(),
-                    help="Select the column that contains target keywords for each page (optional)"
+                    help="Column containing target keywords (comma-separated)"
                 )
-                st.markdown('</div>', unsafe_allow_html=True)
             
-            with col3:
-                st.markdown('<div class="column-selector">', unsafe_allow_html=True)
-                st.markdown("**Select Category Column (Optional):**")
-                category_column = st.selectbox(
-                    "Choose the column containing page categories",
-                    options=['None'] + df.columns.tolist(),
-                    help="Select the column that contains page categories (optional)"
-                )
-                st.markdown('</div>', unsafe_allow_html=True)
-            
-            st.markdown('</div>', unsafe_allow_html=True)
-            
-            # Process the dataframe based on selections
+            # Create standardized dataframe
             if url_column:
-                priority_df = df.copy()
-                
-                # Rename columns based on user selection
-                priority_df = priority_df.rename(columns={url_column: 'Hub URL'})
+                priority_df = pd.DataFrame({
+                    'URL': df[url_column]
+                })
                 
                 if keyword_column != 'None':
-                    priority_df = priority_df.rename(columns={keyword_column: 'Target Keywords'})
+                    priority_df['Target Keywords'] = df[keyword_column]
                 else:
-                    priority_df['Target Keywords'] = 'No keywords specified'
+                    priority_df['Target Keywords'] = ''
                 
-                if category_column != 'None':
-                    priority_df = priority_df.rename(columns={category_column: 'Category'})
-                else:
-                    priority_df['Category'] = 'Not specified'
+                # Validate URLs
+                valid_urls = 0
+                for url in priority_df['URL']:
+                    try:
+                        parsed = urlparse(str(url))
+                        if parsed.netloc:
+                            valid_urls += 1
+                    except:
+                        continue
                 
-                # Clean the dataframe
-                priority_df = priority_df[priority_df['Hub URL'].notna()]
-                priority_df = priority_df[priority_df['Hub URL'].str.contains('http', na=False)]
-                
-                # Show processed data preview
-                st.markdown("**Processed Priority Pages Preview:**")
-                display_columns = ['Hub URL', 'Target Keywords', 'Category']
-                st.dataframe(priority_df[display_columns].head(10), use_container_width=True)
-                
-                # Show statistics
-                col1, col2, col3 = st.columns(3)
-                with col1:
-                    st.metric("Total Priority Pages", len(priority_df))
-                with col2:
-                    unique_categories = priority_df['Category'].nunique()
-                    st.metric("Unique Categories", unique_categories)
-                with col3:
-                    pages_with_keywords = len(priority_df[priority_df['Target Keywords'] != 'No keywords specified'])
-                    st.metric("Pages with Keywords", pages_with_keywords)
-                
-                # Validation warnings
-                if len(priority_df) == 0:
-                    st.error("❌ No valid URLs found in the selected column. Please check your data.")
-                    return None
-                
-                # Show category distribution
-                if category_column != 'None':
-                    st.markdown("**Category Distribution:**")
-                    category_counts = priority_df['Category'].value_counts()
-                    for category, count in category_counts.head(10).items():
-                        st.markdown(f"• **{category}**: {count} pages")
+                st.markdown(f"""
+                <div class="success-card">
+                    <h4>✅ Configuration Complete</h4>
+                    <p><strong>Total Pages:</strong> {len(priority_df)}</p>
+                    <p><strong>Valid URLs:</strong> {valid_urls}</p>
+                    <p><strong>Success Rate:</strong> {(valid_urls/len(priority_df)*100):.1f}%</p>
+                </div>
+                """, unsafe_allow_html=True)
                 
                 return priority_df
             
         except Exception as e:
-            st.error(f"❌ Error processing CSV file: {str(e)}")
-            st.info("💡 Please ensure your CSV file is properly formatted and contains valid URLs.")
+            st.markdown(f"""
+            <div class="critical-card">
+                <h4>❌ Error Reading File</h4>
+                <p>{str(e)}</p>
+            </div>
+            """, unsafe_allow_html=True)
             return None
     
     return None
 
-class EnhancedWebCrawler:
-    """Enhanced web crawler with better URL discovery and processing"""
-    
-    def __init__(self, max_pages=500, delay=1):
-        self.max_pages = max_pages
-        self.delay = delay
-        self.visited_urls = set()
-        self.internal_links = defaultdict(list)
-        self.page_data = {}
-        self.domain = None
-        self.category_detector = DynamicCategoryDetector()
-        
-    def is_valid_url(self, url):
-        """Check if URL is valid and belongs to the domain"""
-        try:
-            parsed = urlparse(url)
-            return (
-                parsed.scheme in ['http', 'https'] and
-                parsed.netloc == self.domain and
-                url not in self.visited_urls and
-                not any(ext in url.lower() for ext in [
-                    '.pdf', '.jpg', '.jpeg', '.png', '.gif', '.css', '.js', 
-                    '.xml', '.ico', '.svg', '.webp', '.mp4', '.mp3', '.zip',
-                    '.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx', '.woff',
-                    '.ttf', '.eot', '.otf', '.json', '.txt', '.log'
-                ]) and
-                not any(param in url.lower() for param in [
-                    'mailto:', 'tel:', 'javascript:', 'ftp:', '#'
-                ])
-            )
-        except:
-            return False
-    
-    def extract_all_links(self, soup, base_url):
-        """Extract all internal links from page with improved detection"""
-        links = []
-        
-        # Extract from <a> tags
-        for link in soup.find_all('a', href=True):
-            href = link['href']
-            full_url = urljoin(base_url, href)
-            if self.is_valid_url(full_url):
-                links.append(full_url)
-        
-        # Extract from navigation menus
-        for nav in soup.find_all('nav'):
-            for link in nav.find_all('a', href=True):
-                href = link['href']
-                full_url = urljoin(base_url, href)
-                if self.is_valid_url(full_url):
-                    links.append(full_url)
-        
-        # Extract from sitemap references
-        for link in soup.find_all('link', rel='sitemap'):
-            href = link.get('href', '')
-            if href:
-                full_url = urljoin(base_url, href)
-                if 'sitemap' in full_url.lower():
-                    sitemap_links = self.extract_sitemap_urls(full_url)
-                    links.extend(sitemap_links)
-        
-        return list(set(links))
-    
-    def extract_sitemap_urls(self, sitemap_url):
-        """Extract URLs from sitemap"""
-        try:
-            response = requests.get(sitemap_url, timeout=10)
-            if response.status_code == 200:
-                soup = BeautifulSoup(response.content, 'xml')
-                urls = []
-                for loc in soup.find_all('loc'):
-                    url = loc.text.strip()
-                    if self.is_valid_url(url):
-                        urls.append(url)
-                return urls
-        except:
-            pass
-        return []
-    
-    def extract_page_content(self, soup):
-        """Extract comprehensive page content"""
-        content = {
-            'title': '',
-            'meta_description': '',
-            'h1': '',
-            'h2_tags': [],
-            'h3_tags': [],
-            'word_count': 0,
-            'links_count': 0,
-            'images_count': 0,
-            'canonical_url': '',
-            'lang': 'en'
-        }
-        
-        # Title
-        title = soup.find('title')
-        content['title'] = title.text.strip() if title else 'No Title'
-        
-        # Meta description
-        meta_desc = soup.find('meta', attrs={'name': 'description'})
-        content['meta_description'] = meta_desc.get('content', '') if meta_desc else 'No Description'
-        
-        # Canonical URL
-        canonical = soup.find('link', rel='canonical')
-        content['canonical_url'] = canonical.get('href', '') if canonical else ''
-        
-        # Language
-        html_tag = soup.find('html')
-        content['lang'] = html_tag.get('lang', 'en') if html_tag else 'en'
-        
-        # H1 tag
-        h1 = soup.find('h1')
-        content['h1'] = h1.text.strip() if h1 else 'No H1'
-        
-        # H2 and H3 tags
-        content['h2_tags'] = [h2.text.strip() for h2 in soup.find_all('h2')]
-        content['h3_tags'] = [h3.text.strip() for h3 in soup.find_all('h3')]
-        
-        # Word count
-        text = soup.get_text()
-        content['word_count'] = len(text.split()) if text else 0
-        
-        # Links and images count
-        content['links_count'] = len(soup.find_all('a', href=True))
-        content['images_count'] = len(soup.find_all('img'))
-        
-        return content
-    
-    def crawl_page(self, url):
-        """Crawl a single page and extract comprehensive data"""
-        try:
-            headers = {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-                'Accept-Language': 'en-US,en;q=0.5',
-                'Accept-Encoding': 'gzip, deflate',
-                'Connection': 'keep-alive'
-            }
-            
-            response = requests.get(url, timeout=15, headers=headers)
-            response.raise_for_status()
-            
-            soup = BeautifulSoup(response.content, 'html.parser')
-            
-            # Extract page content
-            content = self.extract_page_content(soup)
-            
-            # Extract internal links
-            links = self.extract_all_links(soup, url)
-            
-            return {
-                'url': url,
-                'title': content['title'],
-                'meta_description': content['meta_description'],
-                'h1': content['h1'],
-                'h2_tags': content['h2_tags'],
-                'h3_tags': content['h3_tags'],
-                'word_count': content['word_count'],
-                'links_count': content['links_count'],
-                'images_count': content['images_count'],
-                'canonical_url': content['canonical_url'],
-                'lang': content['lang'],
-                'status': response.status_code,
-                'links': links
-            }
-            
-        except Exception as e:
-            return {
-                'url': url,
-                'title': 'Error',
-                'meta_description': str(e),
-                'h1': 'Error',
-                'h2_tags': [],
-                'h3_tags': [],
-                'word_count': 0,
-                'links_count': 0,
-                'images_count': 0,
-                'canonical_url': '',
-                'lang': 'en',
-                'status': 0,
-                'links': []
-            }
-    
-    def discover_initial_urls(self, start_url):
-        """Discover initial URLs from homepage and sitemap"""
-        urls = [start_url]
-        
-        try:
-            # Try to find sitemap.xml
-            sitemap_urls = [
-                f"{start_url}/sitemap.xml",
-                f"{start_url}/sitemap_index.xml",
-                f"{start_url}/sitemap/",
-                f"{start_url}/robots.txt"
-            ]
-            
-            for sitemap_url in sitemap_urls:
-                try:
-                    response = requests.get(sitemap_url, timeout=10)
-                    if response.status_code == 200:
-                        if 'sitemap' in sitemap_url:
-                            sitemap_links = self.extract_sitemap_urls(sitemap_url)
-                            urls.extend(sitemap_links[:100])  # Limit sitemap URLs
-                        elif 'robots.txt' in sitemap_url:
-                            # Extract sitemap URLs from robots.txt
-                            for line in response.text.split('\n'):
-                                if line.lower().startswith('sitemap:'):
-                                    sitemap_url = line.split(':', 1)[1].strip()
-                                    sitemap_links = self.extract_sitemap_urls(sitemap_url)
-                                    urls.extend(sitemap_links[:100])
-                except:
-                    continue
-            
-            return list(set(urls))
-            
-        except:
-            return [start_url]
-    
-    def crawl_website(self, start_url):
-        """Crawl entire website starting from URL with enhanced discovery"""
-        self.domain = urlparse(start_url).netloc
-        
-        # Discover initial URLs
-        initial_urls = self.discover_initial_urls(start_url)
-        to_visit = initial_urls
-        
-        progress_bar = st.progress(0)
-        status_text = st.empty()
-        
-        while to_visit and len(self.visited_urls) < self.max_pages:
-            current_batch = to_visit[:5]
-            to_visit = to_visit[5:]
-            
-            for url in current_batch:
-                if url not in self.visited_urls:
-                    self.visited_urls.add(url)
-                    
-                    page_data = self.crawl_page(url)
-                    self.page_data[url] = page_data
-                    
-                    # Store internal links
-                    self.internal_links[url] = page_data['links']
-                    
-                    # Add new URLs to visit
-                    for link in page_data['links']:
-                        if link not in self.visited_urls and link not in to_visit:
-                            to_visit.append(link)
-                    
-                    # Update progress
-                    progress = len(self.visited_urls) / min(self.max_pages, len(self.visited_urls) + len(to_visit))
-                    progress_bar.progress(min(progress, 1.0))
-                    status_text.text(f"Crawled {len(self.visited_urls)} pages... Found {len(to_visit)} more URLs to visit")
-                    
-                    time.sleep(self.delay)
-        
-        progress_bar.progress(1.0)
-        status_text.text(f"✅ Crawling complete! Found {len(self.page_data)} pages with {sum(len(links) for links in self.internal_links.values())} internal links")
-        
-        return self.page_data, dict(self.internal_links)
-
-class PageRankCalculator:
-    """Calculate PageRank using NetworkX with enhanced algorithms"""
-    
-    def __init__(self, damping_factor=0.85, max_iterations=100, tolerance=1e-6):
-        self.damping_factor = damping_factor
-        self.max_iterations = max_iterations
-        self.tolerance = tolerance
-    
-    def calculate_pagerank(self, internal_links):
-        """Calculate PageRank using NetworkX with fallback methods"""
-        G = nx.DiGraph()
-        
-        # Add all pages as nodes
-        all_pages = set(internal_links.keys())
-        for page in internal_links.keys():
-            all_pages.update(internal_links[page])
-        
-        G.add_nodes_from(all_pages)
-        
-        # Add edges with weights
-        for source, targets in internal_links.items():
-            for target in targets:
-                if target in all_pages:
-                    if G.has_edge(source, target):
-                        G[source][target]['weight'] += 1
-                    else:
-                        G.add_edge(source, target, weight=1)
-        
-        try:
-            # Try standard PageRank
-            pagerank_scores = nx.pagerank(
-                G, 
-                alpha=self.damping_factor,
-                max_iter=self.max_iterations,
-                tol=self.tolerance,
-                weight='weight'
-            )
-        except:
-            try:
-                # Fallback to unweighted PageRank
-                pagerank_scores = nx.pagerank(
-                    G, 
-                    alpha=self.damping_factor,
-                    max_iter=self.max_iterations,
-                    tol=self.tolerance
-                )
-            except:
-                # Final fallback - equal distribution
-                pagerank_scores = {node: 1.0/len(all_pages) for node in all_pages}
-        
-        return pagerank_scores
-
-class UniversalSEOAnalyzer:
-    """Universal SEO analyzer that works with any website"""
-    
-    def __init__(self, priority_pages_df=None):
-        self.priority_pages_df = priority_pages_df
-        self.category_detector = DynamicCategoryDetector()
-        
-    def analyze_pagerank_distribution(self, pagerank_scores, page_data):
-        """Analyze PageRank distribution with dynamic categorization"""
-        # Auto-detect categories
-        categorized_pages, category_counts, common_segments, content_keywords = self.category_detector.auto_detect_categories(page_data)
-        
-        # Get business value mapping
-        business_value_mapping = self.category_detector.get_business_value_mapping(
-            categorized_pages.values(), 
-            self.priority_pages_df
-        )
-        
-        # Create analysis dataframe
-        analysis_data = []
-        
-        for url, score in pagerank_scores.items():
-            if url in page_data:
-                data = page_data[url]
-                category = categorized_pages.get(url, 'other')
-                business_value = business_value_mapping.get(category, 'Medium Business Value')
-                
-                # Check if this is a priority page
-                is_priority = False
-                target_keywords = 'No keywords specified'
-                priority_category = 'Not specified'
-                
-                if self.priority_pages_df is not None and not self.priority_pages_df.empty:
-                    priority_match = self.priority_pages_df[self.priority_pages_df['Hub URL'] == url]
-                    if not priority_match.empty:
-                        is_priority = True
-                        target_keywords = priority_match.iloc[0].get('Target Keywords', 'No keywords specified')
-                        priority_category = priority_match.iloc[0].get('Category', 'Not specified')
-                        business_value = 'High Business Value'  # Override for priority pages
-                
-                analysis_data.append({
-                    'URL': url,
-                    'PageRank': score,
-                    'Category': category,
-                    'Title': data.get('title', ''),
-                    'H1': data.get('h1', ''),
-                    'Word_Count': data.get('word_count', 0),
-                    'Links_Count': data.get('links_count', 0),
-                    'Images_Count': data.get('images_count', 0),
-                    'Business_Value': business_value,
-                    'Status': data.get('status', 0),
-                    'Canonical_URL': data.get('canonical_url', ''),
-                    'Language': data.get('lang', 'en'),
-                    'Is_Priority': is_priority,
-                    'Target_Keywords': target_keywords,
-                    'Priority_Category': priority_category
-                })
-        
-        df = pd.DataFrame(analysis_data)
-        if len(df) > 0:
-            df['PageRank_Normalized'] = df['PageRank'] * 1000
-            df['Percentage'] = (df['PageRank'] / df['PageRank'].sum()) * 100
-            df['Rank'] = df['PageRank'].rank(ascending=False)
-            df = df.sort_values('PageRank', ascending=False)
-        
-        return df, category_counts, common_segments, content_keywords, business_value_mapping
-
-class UniversalVisualizationEngine:
-    """Create visualizations for any website with priority pages integration"""
-    
-    def create_category_discovery_chart(self, category_counts, common_segments):
-        """Show discovered categories and URL patterns"""
-        
-        # Category distribution
-        fig = make_subplots(
-            rows=1, cols=2,
-            subplot_titles=('Discovered Categories', 'Common URL Patterns'),
-            specs=[[{"type": "pie"}, {"type": "bar"}]]
-        )
-        
-        # Categories pie chart
-        categories = list(category_counts.keys())
-        counts = list(category_counts.values())
-        
-        fig.add_trace(
-            go.Pie(labels=categories, values=counts, name="Categories"),
-            row=1, col=1
-        )
-        
-        # URL patterns bar chart
-        if common_segments:
-            fig.add_trace(
-                go.Bar(
-                    x=common_segments[:10],
-                    y=[category_counts.get(seg, 0) for seg in common_segments[:10]],
-                    name="URL Patterns"
-                ),
-                row=1, col=2
-            )
-        
-        fig.update_layout(
-            title_text="Website Structure Analysis",
-            showlegend=True,
-            height=400
-        )
-        
-        return fig
-    
-    def create_business_value_analysis(self, analysis_df):
-        """Create business value analysis chart"""
-        if len(analysis_df) == 0:
-            return None
-        
-        business_summary = analysis_df.groupby('Business_Value').agg({
-            'PageRank': 'sum',
-            'Percentage': 'sum',
-            'URL': 'count'
-        }).reset_index()
-        
-        fig = px.bar(
-            business_summary,
-            x='Business_Value',
-            y='Percentage',
-            color='Business_Value',
-            title='PageRank Distribution by Business Value',
-            labels={'Percentage': 'PageRank Percentage (%)', 'Business_Value': 'Business Value'},
-            color_discrete_map={
-                'High Business Value': '#4ecdc4',
-                'Medium Business Value': '#ffd93d',
-                'Low Business Value': '#ff6b6b'
-            }
-        )
-        
-        # Add value labels on bars
-        for i, row in business_summary.iterrows():
-            fig.add_annotation(
-                x=row['Business_Value'],
-                y=row['Percentage'],
-                text=f"{row['Percentage']:.1f}%<br>({row['URL']} pages)",
-                showarrow=False,
-                font=dict(color="white", size=12),
-                bgcolor="rgba(0,0,0,0.5)",
-                bordercolor="white",
-                borderwidth=1
-            )
-        
-        return fig
-    
-    def create_priority_pages_detailed_analysis(self, analysis_df):
-        """Create detailed priority pages analysis"""
-        if len(analysis_df) == 0:
-            return None
-        
-        priority_pages = analysis_df[analysis_df['Is_Priority'] == True]
-        
-        if len(priority_pages) == 0:
-            return None
-        
-        fig = px.scatter(
-            priority_pages,
-            x='Rank',
-            y='PageRank',
-            size='Percentage',
-            color='Priority_Category',
-            hover_data=['URL', 'Title', 'Target_Keywords'],
-            title='Priority Pages Performance Analysis',
-            labels={'Rank': 'PageRank Rank', 'PageRank': 'PageRank Value'}
-        )
-        
-        fig.update_layout(height=500)
-        return fig
-    
-    def create_priority_vs_regular_comparison(self, analysis_df):
-        """Create comparison between priority and regular pages"""
-        if len(analysis_df) == 0:
-            return None
-        
-        analysis_df['Page_Type'] = analysis_df['Is_Priority'].apply(
-            lambda x: 'Priority Page' if x else 'Regular Page'
-        )
-        
-        fig = px.scatter(
-            analysis_df.head(100),
-            x='Rank',
-            y='PageRank',
-            color='Page_Type',
-            size='Percentage',
-            hover_data=['URL', 'Category', 'Title', 'Target_Keywords'],
-            title='Priority Pages vs Regular Pages Analysis',
-            labels={'Rank': 'PageRank Rank', 'PageRank': 'PageRank Value'},
-            color_discrete_map={'Priority Page': '#e74c3c', 'Regular Page': '#95a5a6'}
-        )
-        
-        return fig
-    
-    def create_category_performance_matrix(self, analysis_df):
-        """Create category performance matrix"""
-        if len(analysis_df) == 0:
-            return None
-        
-        category_summary = analysis_df.groupby('Category').agg({
-            'PageRank': 'sum',
-            'Percentage': 'sum',
-            'URL': 'count',
-            'Word_Count': 'mean'
-        }).reset_index()
-        
-        fig = px.scatter(
-            category_summary,
-            x='URL',
-            y='Percentage',
-            size='Word_Count',
-            color='PageRank',
-            hover_data=['Category'],
-            title='Category Performance Matrix',
-            labels={
-                'URL': 'Number of Pages',
-                'Percentage': 'PageRank Percentage (%)',
-                'Word_Count': 'Average Word Count'
-            },
-            color_continuous_scale='viridis'
-        )
-        
-        return fig
-    
-    def create_network_visualization(self, analysis_df, internal_links):
-        """Create network visualization with priority pages highlighted"""
-        if len(analysis_df) == 0:
-            return None
-        
-        # Create network graph for top pages
-        G = nx.DiGraph()
-        
-        top_pages = analysis_df.head(30)
-        for _, row in top_pages.iterrows():
-            G.add_node(row['URL'],
-                      pagerank=row['PageRank'],
-                      category=row['Category'],
-                      business_value=row['Business_Value'],
-                      is_priority=row['Is_Priority'],
-                      target_keywords=row['Target_Keywords'],
-                      title=row['Title'][:50] + '...' if len(row['Title']) > 50 else row['Title'])
-        
-        # Add edges
-        for source, targets in internal_links.items():
-            if source in G.nodes:
-                for target in targets:
-                    if target in G.nodes:
-                        G.add_edge(source, target)
-        
-        if len(G.nodes) == 0:
-            return None
-        
-        # Create layout
-        pos = nx.spring_layout(G, k=2, iterations=50)
-        
-        # Create edges
-        edge_x = []
-        edge_y = []
-        for edge in G.edges():
-            x0, y0 = pos[edge[0]]
-            x1, y1 = pos[edge[1]]
-            edge_x.extend([x0, x1, None])
-            edge_y.extend([y0, y1, None])
-        
-        edge_trace = go.Scatter(
-            x=edge_x, y=edge_y,
-            line=dict(width=0.5, color='#888'),
-            hoverinfo='none',
-            mode='lines'
-        )
-        
-        # Create nodes
-        node_x = []
-        node_y = []
-        node_text = []
-        node_color = []
-        node_size = []
-        
-        for node in G.nodes():
-            x, y = pos[node]
-            node_x.append(x)
-            node_y.append(y)
-            
-            node_data = G.nodes[node]
-            node_text.append(f"Category: {node_data['category']}<br>"
-                           f"Title: {node_data['title']}<br>"
-                           f"PageRank: {node_data['pagerank']:.4f}<br>"
-                           f"Business Value: {node_data['business_value']}<br>"
-                           f"Priority: {'Yes' if node_data['is_priority'] else 'No'}<br>"
-                           f"Keywords: {node_data['target_keywords']}")
-            
-            # Color by priority status and business value
-            if node_data['is_priority']:
-                node_color.append('#e74c3c')  # Red for priority pages
-            elif node_data['business_value'] == 'High Business Value':
-                node_color.append('#4ecdc4')
-            elif node_data['business_value'] == 'Low Business Value':
-                node_color.append('#ff6b6b')
-            else:
-                node_color.append('#ffd93d')
-            
-            # Size by PageRank
-            node_size.append(max(10, node_data['pagerank'] * 10000))
-        
-        node_trace = go.Scatter(
-            x=node_x, y=node_y,
-            mode='markers',
-            hoverinfo='text',
-            text=node_text,
-            marker=dict(
-                size=node_size,
-                color=node_color,
-                line=dict(width=2)
-            )
-        )
-        
-        # Updated layout syntax
-        fig = go.Figure(data=[edge_trace, node_trace],
-                       layout=go.Layout(
-                           title=dict(
-                               text='Internal Link Network (Red = Priority Pages)',
-                               font=dict(size=16)
-                           ),
-                           showlegend=False,
-                           hovermode='closest',
-                           margin=dict(b=20,l=5,r=5,t=40),
-                           annotations=[dict(
-                               text="Node size = PageRank, Red = Priority Pages",
-                               showarrow=False,
-                               xref="paper", yref="paper",
-                               x=0.005, y=-0.002)],
-                           xaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
-                           yaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
-                           height=600
-                       ))
-        
-        return fig
-
-def create_excel_download(analysis_df, category_counts, business_value_mapping, priority_pages_df=None, recommendations_df=None):
-    """Create comprehensive Excel report with priority pages analysis"""
-    output = io.BytesIO()
-    
-    with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-        # Main analysis
-        analysis_df.to_excel(writer, sheet_name='PageRank_Analysis', index=False)
-        
-        # Priority pages specific analysis
-        if priority_pages_df is not None and not priority_pages_df.empty:
-            priority_analysis = analysis_df[analysis_df['Is_Priority'] == True]
-            if not priority_analysis.empty:
-                priority_analysis.to_excel(writer, sheet_name='Priority_Pages_Analysis', index=False)
-            
-            # Priority pages performance summary
-            priority_summary = priority_analysis.groupby('Priority_Category').agg({
-                'PageRank': ['sum', 'mean'],
-                'Percentage': ['sum', 'mean'],
-                'Rank': 'mean',
-                'URL': 'count'
-            }).round(3)
-            priority_summary.to_excel(writer, sheet_name='Priority_Summary')
-            
-            # Keyword analysis
-            keyword_analysis = priority_analysis[priority_analysis['Target_Keywords'] != 'No keywords specified']
-            if not keyword_analysis.empty:
-                keyword_analysis[['URL', 'Title', 'Target_Keywords', 'PageRank', 'Percentage', 'Rank']].to_excel(
-                    writer, sheet_name='Keyword_Analysis', index=False
-                )
-        
-        # Category summary
-        category_summary = analysis_df.groupby('Category').agg({
-            'PageRank': 'sum',
-            'Percentage': 'sum',
-            'URL': 'count',
-            'Business_Value': 'first'
-        }).sort_values('PageRank', ascending=False)
-        category_summary.to_excel(writer, sheet_name='Category_Summary')
-        
-        # Business value summary
-        business_summary = analysis_df.groupby('Business_Value').agg({
-            'PageRank': 'sum',
-            'Percentage': 'sum',
-            'URL': 'count'
-        }).round(3)
-        business_summary.to_excel(writer, sheet_name='Business_Value_Summary')
-        
-        # Recommendations
-        if recommendations_df is not None and not recommendations_df.empty:
-            recommendations_df.to_excel(writer, sheet_name='Recommendations', index=False)
-        
-        # Top pages by category
-        top_pages_by_category = []
-        for category in category_counts.keys():
-            top_page = analysis_df[analysis_df['Category'] == category].head(1)
-            if not top_page.empty:
-                top_pages_by_category.append(top_page.iloc[0])
-        
-        if top_pages_by_category:
-            top_pages_df = pd.DataFrame(top_pages_by_category)
-            top_pages_df.to_excel(writer, sheet_name='Top_Pages_By_Category', index=False)
-    
-    return output.getvalue()
-
-def generate_universal_recommendations(analysis_df, category_counts, business_value_mapping, priority_pages_df=None):
-    """Generate recommendations with priority pages insights"""
-    recommendations = []
-    
-    # Priority pages specific recommendations
-    if priority_pages_df is not None and not priority_pages_df.empty:
-        priority_pages = analysis_df[analysis_df['Is_Priority'] == True]
-        
-        # Low performing priority pages
-        low_priority_pages = priority_pages[priority_pages['Percentage'] < 1]
-        for _, row in low_priority_pages.iterrows():
-            recommendations.append({
-                'Issue': f"Priority page '{row['Title']}' receiving only {row['Percentage']:.1f}% of PageRank",
-                'Page_URL': row['URL'],
-                'Category': row['Category'],
-                'Target_Keywords': row['Target_Keywords'],
-                'Current_PageRank': f"{row['PageRank']:.4f}",
-                'Current_Percentage': f"{row['Percentage']:.1f}%",
-                'Current_Rank': f"#{int(row['Rank'])}",
-                'Impact': 'Critical - Priority page underperforming',
-                'Recommendation': f"Increase internal linking to this priority page targeting '{row['Target_Keywords']}'",
-                'Priority': 'Immediate'
-            })
-    
-    # Find low-value pages with high PageRank
-    low_value_high_pr = analysis_df[
-        (analysis_df['Business_Value'] == 'Low Business Value') & 
-        (analysis_df['Percentage'] > 2)
-    ].sort_values('PageRank', ascending=False)
-    
-    for _, row in low_value_high_pr.iterrows():
-        recommendations.append({
-            'Issue': f"Low-value {row['Category']} page receiving {row['Percentage']:.1f}% of PageRank",
-            'Page_URL': row['URL'],
-            'Category': row['Category'],
-            'Target_Keywords': row['Target_Keywords'],
-            'Current_PageRank': f"{row['PageRank']:.4f}",
-            'Current_Percentage': f"{row['Percentage']:.1f}%",
-            'Current_Rank': f"#{int(row['Rank'])}",
-            'Impact': 'High - Non-revenue page getting ranking power',
-            'Recommendation': f"Reduce internal links to {row['Category']} pages or implement nofollow",
-            'Priority': 'Immediate' if row['Percentage'] > 5 else 'High'
-        })
-    
-    # Find high-value pages with low PageRank
-    high_value_low_pr = analysis_df[
-        (analysis_df['Business_Value'] == 'High Business Value') & 
-        (analysis_df['Percentage'] < 1) &
-        (analysis_df['Is_Priority'] == False)  # Exclude priority pages as they're handled above
-    ].sort_values('PageRank', ascending=True)
-    
-    for _, row in high_value_low_pr.iterrows():
-        recommendations.append({
-            'Issue': f"High-value {row['Category']} page only receiving {row['Percentage']:.1f}% of PageRank",
-            'Page_URL': row['URL'],
-            'Category': row['Category'],
-            'Target_Keywords': row['Target_Keywords'],
-            'Current_PageRank': f"{row['PageRank']:.4f}",
-            'Current_Percentage': f"{row['Percentage']:.1f}%",
-            'Current_Rank': f"#{int(row['Rank'])}",
-            'Impact': 'High - Revenue page underoptimized',
-            'Recommendation': f"Increase internal linking to {row['Category']} pages",
-            'Priority': 'Immediate'
-        })
-    
-    return pd.DataFrame(recommendations)
-
-def display_priority_pages_insights(analysis_df, priority_pages_df):
-    """Display detailed insights about priority pages"""
-    if priority_pages_df is None or priority_pages_df.empty:
-        return
-    
-    priority_pages = analysis_df[analysis_df['Is_Priority'] == True]
-    
-    if len(priority_pages) == 0:
-        st.warning("⚠️ No priority pages found in the crawled data. Please check your URLs.")
-        return
-    
-    st.markdown('<div class="priority-config">', unsafe_allow_html=True)
-    st.markdown("### 🎯 Priority Pages Performance Analysis")
-    
-    # Priority pages metrics
-    col1, col2, col3, col4 = st.columns(4)
-    
-    with col1:
-        st.metric("Priority Pages Found", len(priority_pages))
-    
-    with col2:
-        avg_rank = priority_pages['Rank'].mean()
-        st.metric("Average Rank", f"#{int(avg_rank)}")
-    
-    with col3:
-        total_priority_pr = priority_pages['Percentage'].sum()
-        st.metric("Total Priority PageRank %", f"{total_priority_pr:.1f}%")
-    
-    with col4:
-        avg_priority_pr = priority_pages['Percentage'].mean()
-        st.metric("Average Priority PageRank %", f"{avg_priority_pr:.1f}%")
-    
-    # Priority pages performance table
-    st.markdown("**Priority Pages Performance:**")
-    priority_display = priority_pages[['URL', 'Title', 'Target_Keywords', 'PageRank', 'Percentage', 'Rank']].copy()
-    priority_display['Rank'] = priority_display['Rank'].astype(int)
-    priority_display = priority_display.sort_values('PageRank', ascending=False)
-    st.dataframe(priority_display, use_container_width=True)
-    
-    # Priority pages by category
-    if 'Priority_Category' in priority_pages.columns:
-        st.markdown("**Priority Pages by Category:**")
-        category_performance = priority_pages.groupby('Priority_Category').agg({
-            'PageRank': 'sum',
-            'Percentage': 'sum',
-            'URL': 'count',
-            'Rank': 'mean'
-        }).round(2)
-        category_performance['Avg_Rank'] = category_performance['Rank'].astype(int)
-        st.dataframe(category_performance, use_container_width=True)
-    
-    # Keyword performance
-    keywords_pages = priority_pages[priority_pages['Target_Keywords'] != 'No keywords specified']
-    if not keywords_pages.empty:
-        st.markdown("**Pages with Target Keywords:**")
-        keyword_display = keywords_pages[['URL', 'Title', 'Target_Keywords', 'PageRank', 'Percentage']].copy()
-        keyword_display = keyword_display.sort_values('PageRank', ascending=False)
-        st.dataframe(keyword_display, use_container_width=True)
-    
-    st.markdown('</div>', unsafe_allow_html=True)
-
-def display_category_insights(category_counts, business_value_mapping, common_segments, content_keywords):
-    """Display insights about discovered categories"""
-    
-    st.markdown('<div class="category-info">', unsafe_allow_html=True)
-    st.markdown("### 🔍 Website Structure Analysis")
-    
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        st.markdown("**📊 Discovered Categories:**")
-        for category, count in sorted(category_counts.items(), key=lambda x: x[1], reverse=True)[:10]:
-            business_value = business_value_mapping.get(category, 'Medium Business Value')
-            emoji = "🟢" if business_value == "High Business Value" else "🟡" if business_value == "Medium Business Value" else "🔴"
-            st.markdown(f"{emoji} **{category}**: {count} pages ({business_value})")
-    
-    with col2:
-        st.markdown("**🔗 Common URL Patterns:**")
-        for segment in common_segments[:10]:
-            st.markdown(f"• `/{segment}/`")
-        
-        if content_keywords:
-            st.markdown("**📝 Key Content Terms:**")
-            for keyword in content_keywords[:8]:
-                st.markdown(f"• {keyword}")
-    
-    st.markdown('</div>', unsafe_allow_html=True)
-
 def main():
-    """Main Streamlit application"""
+    # Stunning header
+    st.markdown("""
+    <div class="main-header">
+        <h1>🚀 Advanced PageRank SEO Analyzer</h1>
+        <h2>AI-Powered Internal Linking Analysis with Route Mapping</h2>
+        <p>Comprehensive analysis with stunning visualizations and intelligent recommendations</p>
+        <p><strong>✨ Now with OpenAI insights and complete internal route visualization ✨</strong></p>
+    </div>
+    """, unsafe_allow_html=True)
     
-    # Header
-    st.markdown('<h1 class="main-header">🌐 Universal PageRank SEO Analyzer</h1>', unsafe_allow_html=True)
-    st.markdown("**Advanced PageRank analysis with priority pages and target keywords configuration**")
+    # Sidebar Configuration
+    st.sidebar.markdown("### 🔧 Configuration Panel")
     
-    # Info box
-    st.info("🚀 Upload your priority pages CSV, select the URL and keyword columns, then analyze any website's PageRank distribution!")
+    # OpenAI API Key with enhanced styling
+    openai_key = st.sidebar.text_input(
+        "🤖 OpenAI API Key",
+        type="password",
+        placeholder="sk-...",
+        help="Enter your OpenAI API key for AI-powered recommendations"
+    )
     
-    # Sidebar
-    st.sidebar.header("⚙️ Configuration")
+    if openai_key:
+        st.sidebar.markdown("✅ **AI Recommendations Enabled**")
+    else:
+        st.sidebar.markdown("⚠️ **Add API key for AI insights**")
     
-    # Crawling settings
-    st.sidebar.subheader("Enhanced Crawling Settings")
-    max_pages = st.sidebar.slider("Maximum Pages to Crawl", 50, 2000, 500)
-    delay = st.sidebar.slider("Delay Between Requests (seconds)", 0.5, 3.0, 1.0)
+    # Website URL
+    website_url = st.sidebar.text_input(
+        "🌐 Website URL",
+        placeholder="https://example.com",
+        help="Enter the website you want to analyze"
+    )
     
-    # PageRank settings
-    st.sidebar.subheader("PageRank Settings")
-    damping_factor = st.sidebar.slider("Damping Factor", 0.1, 0.95, 0.85)
-    max_iterations = st.sidebar.slider("Maximum Iterations", 50, 200, 100)
+    # Advanced crawling parameters
+    st.sidebar.markdown("### ⚙️ Crawling Settings")
     
-    # Main interface
-    col1, col2 = st.columns([2, 1])
+    max_pages = st.sidebar.slider("📄 Max Pages to Crawl", 100, 5000, 1000, step=100)
+    crawl_depth = st.sidebar.slider("🕳️ Crawl Depth", 1, 5, 3)
+    crawl_delay = st.sidebar.slider("⏱️ Crawl Delay (seconds)", 0.1, 2.0, 0.2, step=0.1)
     
-    with col1:
-        st.subheader("🌐 Website Analysis")
-        website_url = st.text_input(
-            "Enter Website URL",
-            placeholder="https://example.com",
-            help="Enter the full URL of the website you want to analyze"
-        )
-        
-        st.markdown("**Enhanced Features:**")
-        st.markdown("• **Priority Pages Integration** - Upload CSV and map columns")
-        st.markdown("• **Target Keywords Analysis** - Track keyword performance")
-        st.markdown("• **Advanced Categorization** - AI-powered page classification")
-        st.markdown("• **Comprehensive Reporting** - Excel export with priority insights")
+    # Priority Pages Upload
+    priority_pages_df = handle_priority_pages_upload()
     
-    with col2:
-        # Priority pages upload and configuration
-        priority_pages_df = handle_priority_pages_upload()
-    
-    # Analysis button
-    if st.button("🚀 Start Enhanced PageRank Analysis", type="primary", disabled=not website_url):
+    # Enhanced Analysis Button
+    if st.sidebar.button("🚀 Start Advanced Analysis", type="primary"):
         if not website_url:
-            st.error("Please enter a website URL")
+            st.markdown("""
+            <div class="critical-card">
+                <h4>❌ Missing Website URL</h4>
+                <p>Please enter a website URL to begin analysis.</p>
+            </div>
+            """, unsafe_allow_html=True)
             return
         
-        try:
-            parsed_url = urlparse(website_url)
-            if not parsed_url.scheme or not parsed_url.netloc:
-                st.error("Please enter a valid URL with http:// or https://")
-                return
-        except:
-            st.error("Invalid URL format")
+        # Initialize analyzer
+        analyzer = AdvancedPageRankAnalyzer(openai_key)
+        
+        # Crawl website with enhanced progress tracking
+        st.markdown("## 🕷️ Website Crawling & Data Collection")
+        crawled_urls = analyzer.crawl_website(website_url, max_pages, crawl_depth, crawl_delay)
+        
+        if not crawled_urls:
+            st.markdown("""
+            <div class="critical-card">
+                <h4>❌ No Pages Found</h4>
+                <p>Please check the URL and try again.</p>
+            </div>
+            """, unsafe_allow_html=True)
             return
         
-        # Initialize components
-        crawler = EnhancedWebCrawler(max_pages, delay)
-        pagerank_calc = PageRankCalculator(damping_factor, max_iterations)
-        viz_engine = UniversalVisualizationEngine()
+        st.markdown(f"""
+        <div class="success-card">
+            <h4>✅ Crawling Successful!</h4>
+            <p><strong>Pages Discovered:</strong> {len(crawled_urls)}</p>
+            <p><strong>Internal Links:</strong> {len(analyzer.graph.edges())}</p>
+            <p><strong>Unique Routes:</strong> {len(set(urlparse(url).path for url in crawled_urls))}</p>
+        </div>
+        """, unsafe_allow_html=True)
         
-        # Step 1: Enhanced Crawling
-        st.subheader("🕷️ Step 1: Enhanced Website Crawling & URL Discovery")
-        st.info("🔍 Discovering URLs from homepage, sitemaps, navigation, and internal links...")
+        # Detect sections
+        st.info("🔍 Analyzing website structure and categorizing pages...")
+        analyzer.section_mapping = analyzer.detect_sections(list(crawled_urls))
         
-        with st.spinner("Crawling website with enhanced discovery..."):
-            page_data, internal_links = crawler.crawl_website(website_url)
+        # Calculate PageRank
+        st.markdown("## 📊 PageRank Calculation & Analysis")
+        pagerank_scores = analyzer.calculate_pagerank()
         
-        if not page_data:
-            st.error("Failed to crawl website. Please check the URL and try again.")
+        if not pagerank_scores:
+            st.error("❌ Could not calculate PageRank scores.")
             return
         
-        st.markdown(f'<div class="success-box">✅ Successfully discovered and crawled {len(page_data)} pages with {sum(len(links) for links in internal_links.values())} internal links</div>', unsafe_allow_html=True)
+        # Create visualizations
+        st.info("🎨 Creating stunning visualizations...")
+        visualizations = create_stunning_visualizations(analyzer, {})
         
-        # Step 2: PageRank Calculation
-        st.subheader("📊 Step 2: Advanced PageRank Calculation")
-        with st.spinner("Calculating PageRank with enhanced algorithms..."):
-            pagerank_scores = pagerank_calc.calculate_pagerank(internal_links)
-        
-        st.success(f"✅ Calculated PageRank for {len(pagerank_scores)} pages")
-        
-        # Step 3: Universal SEO Analysis
-        st.subheader("🔍 Step 3: AI-Powered SEO Analysis with Priority Pages")
-        with st.spinner("Analyzing PageRank distribution with priority pages integration..."):
-            seo_analyzer = UniversalSEOAnalyzer(priority_pages_df)
-            analysis_df, category_counts, common_segments, content_keywords, business_value_mapping = seo_analyzer.analyze_pagerank_distribution(pagerank_scores, page_data)
-        
-        if len(analysis_df) == 0:
-            st.error("No data to analyze")
-            return
-        
-        # Display category insights
-        display_category_insights(category_counts, business_value_mapping, common_segments, content_keywords)
-        
-        # Display priority pages insights
-        display_priority_pages_insights(analysis_df, priority_pages_df)
-        
-        # Display key metrics
-        st.subheader("📈 Key Performance Metrics")
-        
-        col1, col2, col3, col4 = st.columns(4)
-        
-        with col1:
-            total_pr = analysis_df['PageRank'].sum()
-            st.metric("Total PageRank", f"{total_pr:.4f}")
-        
-        with col2:
-            high_value_pr = analysis_df[analysis_df['Business_Value'] == 'High Business Value']['Percentage'].sum()
-            st.metric("High Value Pages %", f"{high_value_pr:.1f}%")
-        
-        with col3:
-            low_value_pr = analysis_df[analysis_df['Business_Value'] == 'Low Business Value']['Percentage'].sum()
-            st.metric("Low Value Pages %", f"{low_value_pr:.1f}%")
-        
-        with col4:
-            priority_pr = analysis_df[analysis_df['Is_Priority'] == True]['Percentage'].sum()
-            st.metric("Priority Pages %", f"{priority_pr:.1f}%")
-        
-        # Visualizations
-        st.subheader("📊 Comprehensive PageRank Analysis")
-        
+        # Display results in enhanced tabs
         tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
-            "Website Structure", 
-            "Business Value", 
-            "Priority Pages", 
-            "Priority vs Regular", 
-            "Category Performance",
-            "Network Graph"
+            "🎯 5 Key Questions", "🗺️ Internal Routes", "📊 Advanced Visuals", 
+            "🔗 Section Analysis", "🤖 AI Recommendations", "📈 Performance Insights"
         ])
         
         with tab1:
-            fig_discovery = viz_engine.create_category_discovery_chart(category_counts, common_segments)
-            if fig_discovery:
-                st.plotly_chart(fig_discovery, use_container_width=True)
+            st.markdown("## 🎯 Analysis of the 5 Critical Questions")
             
-            st.subheader("Discovered Categories")
-            category_df = pd.DataFrame([
-                {
-                    'Category': cat, 
-                    'Page_Count': count, 
-                    'Business_Value': business_value_mapping.get(cat, 'Medium'),
-                    'Percentage': f"{(count/len(analysis_df)*100):.1f}%"
-                }
-                for cat, count in category_counts.items()
-            ]).sort_values('Page_Count', ascending=False)
-            st.dataframe(category_df, use_container_width=True)
+            # Question 1: Which sections receive most PR?
+            st.markdown('<div class="question-header">1. Which Sections of the site are receiving the most PageRank?</div>', unsafe_allow_html=True)
+            
+            # Calculate section PageRank
+            section_pr = defaultdict(float)
+            for url, score in pagerank_scores.items():
+                section = analyzer.section_mapping.get(url, 'other')
+                section_pr[section] += score
+            
+            top_sections = sorted(section_pr.items(), key=lambda x: x[1], reverse=True)
+            
+            col1, col2 = st.columns([2, 1])
+            
+            with col1:
+                # Create enhanced section chart
+                section_df = pd.DataFrame([
+                    {
+                        'section': section,
+                        'pagerank': pr_score,
+                        'percentage': (pr_score / sum(section_pr.values()) * 100) if section_pr else 0,
+                        'business_value': analyzer.category_detector.get_business_value(section)
+                    }
+                    for section, pr_score in top_sections
+                ])
+                
+                fig_sections = px.bar(
+                    section_df.head(10),
+                    x='section',
+                    y='pagerank',
+                    color='business_value',
+                    color_discrete_map={
+                        'high': '#22c55e',
+                        'medium': '#f59e0b',
+                        'low': '#ef4444'
+                    },
+                    title='📊 Section PageRank Distribution',
+                    labels={'pagerank': 'PageRank Score', 'section': 'Section'}
+                )
+                
+                fig_sections.update_layout(height=500)
+                st.plotly_chart(fig_sections, use_container_width=True)
+            
+            with col2:
+                st.markdown("""
+                <div class="insight-card">
+                    <h4>🏆 Top Sections</h4>
+                </div>
+                """, unsafe_allow_html=True)
+                
+                for i, (section, score) in enumerate(top_sections[:5], 1):
+                    percentage = (score / sum(section_pr.values()) * 100) if section_pr else 0
+                    business_value = analyzer.category_detector.get_business_value(section)
+                    value_emoji = {'high': '🟢', 'medium': '🟡', 'low': '🔴'}[business_value]
+                    
+                    st.markdown(f"""
+                    **{i}. {section.title()}** {value_emoji}  
+                    📊 {score:.4f} PR ({percentage:.1f}%)  
+                    📄 {sum(1 for url, sec in analyzer.section_mapping.items() if sec == section)} pages  
+                    💼 {business_value.title()} business value
+                    """)
+            
+            # Question 2: Which specific pages receive most PR?
+            st.markdown('<div class="question-header">2. Which specific pages receive the most PageRank?</div>', unsafe_allow_html=True)
+            
+            top_pages = sorted(pagerank_scores.items(), key=lambda x: x[1], reverse=True)[:20]
+            
+            top_pages_data = []
+            for i, (url, score) in enumerate(top_pages, 1):
+                page_info = analyzer.page_data.get(url, {})
+                section = analyzer.section_mapping.get(url, 'other')
+                business_value = analyzer.category_detector.get_business_value(section)
+                
+                top_pages_data.append({
+                    'Rank': i,
+                    'URL': url[:80] + '...' if len(url) > 80 else url,
+                    'PageRank Score': f"{score:.6f}",
+                    'Section': section,
+                    'Business Value': business_value,
+                    'Title': page_info.get('title', '')[:50] + '...' if len(page_info.get('title', '')) > 50 else page_info.get('title', ''),
+                    'Route Depth': page_info.get('route_depth', 0),
+                    'Internal Links': page_info.get('internal_links', 0)
+                })
+            
+            st.dataframe(pd.DataFrame(top_pages_data), use_container_width=True, height=600)
+            
+            # Question 3: Priority pages alignment
+            st.markdown('<div class="question-header">3. Do these align with your Priority Target Pages?</div>', unsafe_allow_html=True)
+            
+            if priority_pages_df is not None and not priority_pages_df.empty:
+                priority_analysis = []
+                all_scores = sorted(pagerank_scores.values(), reverse=True)
+                
+                for _, row in priority_pages_df.iterrows():
+                    url = row.get('URL', '')
+                    if url in pagerank_scores:
+                        score = pagerank_scores[url]
+                        rank = all_scores.index(score) + 1
+                        percentile = (rank / len(pagerank_scores)) * 100
+                        
+                        priority_analysis.append({
+                            'url': url,
+                            'pagerank': score,
+                            'rank': rank,
+                            'percentile': percentile,
+                            'section': analyzer.section_mapping.get(url, 'other')
+                        })
+                
+                if priority_analysis:
+                    avg_percentile = np.mean([p['percentile'] for p in priority_analysis])
+                    alignment_score = max(0, 100 - avg_percentile)
+                    
+                    col1, col2, col3 = st.columns(3)
+                    
+                    with col1:
+                        color = 'success' if alignment_score > 70 else 'warning' if alignment_score > 40 else 'critical'
+                        st.markdown(f"""
+                        <div class="{color}-card">
+                            <h3>🎯 Alignment Score</h3>
+                            <h2>{alignment_score:.1f}/100</h2>
+                            <p>Higher = Better alignment with PageRank distribution</p>
+                        </div>
+                        """, unsafe_allow_html=True)
+                    
+                    with col2:
+                        found_count = len(priority_analysis)
+                        total_count = len(priority_pages_df)
+                        st.markdown(f"""
+                        <div class="metric-card">
+                            <h3>📊 Coverage</h3>
+                            <h2>{found_count}/{total_count}</h2>
+                            <p>{(found_count/total_count*100):.1f}% of priority pages found</p>
+                        </div>
+                        """, unsafe_allow_html=True)
+                    
+                    with col3:
+                        avg_rank = np.mean([p['rank'] for p in priority_analysis])
+                        st.markdown(f"""
+                        <div class="metric-card">
+                            <h3>📈 Avg Rank</h3>
+                            <h2>{avg_rank:.0f}</h2>
+                            <p>Lower ranks = better performance</p>
+                        </div>
+                        """, unsafe_allow_html=True)
+                    
+                    # Priority pages performance visualization
+                    priority_df = pd.DataFrame(priority_analysis)
+                    
+                    fig_priority = px.scatter(
+                        priority_df,
+                        x='rank',
+                        y='pagerank',
+                        size='pagerank',
+                        color='section',
+                        title='🎯 Priority Pages Performance Analysis',
+                        labels={'rank': 'PageRank Rank', 'pagerank': 'PageRank Score'}
+                    )
+                    
+                    fig_priority.update_layout(height=500)
+                    st.plotly_chart(fig_priority, use_container_width=True)
+                    
+                else:
+                    st.markdown("""
+                    <div class="warning-card">
+                        <h4>⚠️ No Priority Pages Found</h4>
+                        <p>None of your priority pages were found in the crawled data. They may be too deep or not linked properly.</p>
+                    </div>
+                    """, unsafe_allow_html=True)
+            else:
+                st.markdown("""
+                <div class="insight-card">
+                    <h4>📁 Upload Priority Pages</h4>
+                    <p>Upload a CSV file with your priority pages to analyze alignment with PageRank distribution.</p>
+                </div>
+                """, unsafe_allow_html=True)
+            
+            # Question 4: PR waste analysis
+            st.markdown('<div class="question-header">4. How can we reduce the PageRank to non-valuable sections?</div>', unsafe_allow_html=True)
+            
+            # Calculate waste
+            low_value_sections = [section for section in section_pr.keys() 
+                                if analyzer.category_detector.get_business_value(section) == 'low']
+            wasted_pr = sum(section_pr[section] for section in low_value_sections)
+            total_pr = sum(section_pr.values())
+            waste_percentage = (wasted_pr / total_pr * 100) if total_pr > 0 else 0
+            
+            col1, col2 = st.columns([1, 2])
+            
+            with col1:
+                color = 'critical' if waste_percentage > 20 else 'warning' if waste_percentage > 10 else 'success'
+                st.markdown(f"""
+                <div class="{color}-card">
+                    <h3>🔴 PageRank Waste</h3>
+                    <h2>{waste_percentage:.1f}%</h2>
+                    <p>Of total PageRank going to low-value sections</p>
+                </div>
+                """, unsafe_allow_html=True)
+            
+            with col2:
+                # Business value pie chart
+                business_values = {'high': 0, 'medium': 0, 'low': 0}
+                for section, pr_score in section_pr.items():
+                    bv = analyzer.category_detector.get_business_value(section)
+                    business_values[bv] += pr_score
+                
+                fig_bv_pie = px.pie(
+                    values=list(business_values.values()),
+                    names=['High Value', 'Medium Value', 'Low Value'],
+                    color_discrete_map={
+                        'High Value': '#22c55e',
+                        'Medium Value': '#f59e0b',
+                        'Low Value': '#ef4444'
+                    },
+                    title='💼 PageRank by Business Value'
+                )
+                
+                st.plotly_chart(fig_bv_pie, use_container_width=True)
+            
+            # Question 5: PR redistribution strategy
+            st.markdown('<div class="question-header">5. How can we redirect this PageRank to priority pages?</div>', unsafe_allow_html=True)
+            
+            redistribution_strategies = []
+            
+            # Find high-PR low-value pages
+            low_value_high_pr_pages = []
+            for url, score in pagerank_scores.items():
+                section = analyzer.section_mapping.get(url, 'other')
+                if analyzer.category_detector.get_business_value(section) == 'low' and score > 0.01:
+                    low_value_high_pr_pages.append((url, score, section))
+            
+            if low_value_high_pr_pages:
+                redistribution_strategies.append({
+                    'title': 'Reduce Links to Low-Value High-PR Pages',
+                    'description': f'Found {len(low_value_high_pr_pages)} low-value pages with significant PageRank',
+                    'impact': 'High',
+                    'pages': low_value_high_pr_pages[:5]
+                })
+            
+            # Find sections that over-link to low-value areas
+            section_linking = defaultdict(lambda: defaultdict(int))
+            for source, target in analyzer.graph.edges():
+                source_section = analyzer.section_mapping.get(source, 'other')
+                target_section = analyzer.section_mapping.get(target, 'other')
+                section_linking[source_section][target_section] += 1
+            
+            for source_section, targets in section_linking.items():
+                total_links = sum(targets.values())
+                low_value_links = sum(count for target_section, count in targets.items() 
+                                    if analyzer.category_detector.get_business_value(target_section) == 'low')
+                
+                if total_links > 0 and (low_value_links / total_links) > 0.3:
+                    redistribution_strategies.append({
+                        'title': f'Optimize {source_section.title()} Section Linking',
+                        'description': f'{(low_value_links/total_links*100):.1f}% of links go to low-value sections',
+                        'impact': 'Medium',
+                        'action': f'Reduce low-value links and add priority page links'
+                    })
+            
+            for i, strategy in enumerate(redistribution_strategies, 1):
+                st.markdown(f"""
+                <div class="insight-card">
+                    <h4>{i}. {strategy['title']} ({strategy['impact']} Impact)</h4>
+                    <p>{strategy['description']}</p>
+                    {f"<p><strong>Action:</strong> {strategy.get('action', 'Review and optimize link allocation')}</p>" if 'action' in strategy else ""}
+                </div>
+                """, unsafe_allow_html=True)
+                
+                if 'pages' in strategy:
+                    st.markdown("**Top pages to review:**")
+                    for url, score, section in strategy['pages']:
+                        st.markdown(f"- `{url[:60]}...` (PR: {score:.4f}, Section: {section})")
         
         with tab2:
-            fig_business = viz_engine.create_business_value_analysis(analysis_df)
-            if fig_business:
-                st.plotly_chart(fig_business, use_container_width=True)
-            
-            business_summary = analysis_df.groupby('Business_Value').agg({
-                'PageRank': 'sum',
-                'Percentage': 'sum',
-                'URL': 'count'
-            }).round(3)
-            st.dataframe(business_summary, use_container_width=True)
+            st.markdown("## 🗺️ Complete Internal Route Analysis")
+            create_route_visualization(analyzer)
         
         with tab3:
-            fig_priority_detailed = viz_engine.create_priority_pages_detailed_analysis(analysis_df)
-            if fig_priority_detailed:
-                st.plotly_chart(fig_priority_detailed, use_container_width=True)
-            else:
-                st.info("No priority pages found in the crawled data")
+            st.markdown("## 📊 Advanced Visualizations")
+            
+            # Sunburst chart
+            st.markdown("### 🌅 Hierarchical PageRank Distribution")
+            st.plotly_chart(visualizations['sunburst'], use_container_width=True)
+            
+            # 3D Network
+            st.markdown("### 🌐 3D PageRank Flow Network")
+            st.plotly_chart(visualizations['network_3d'], use_container_width=True)
+            
+            # Enhanced Sankey
+            st.markdown("### 🔄 Advanced Section Flow Analysis")
+            st.plotly_chart(visualizations['sankey'], use_container_width=True)
+            
+            # Route depth analysis
+            st.markdown("### 📊 Route Depth Performance Dashboard")
+            st.plotly_chart(visualizations['depth_analysis'], use_container_width=True)
         
         with tab4:
-            fig_priority_comparison = viz_engine.create_priority_vs_regular_comparison(analysis_df)
-            if fig_priority_comparison:
-                st.plotly_chart(fig_priority_comparison, use_container_width=True)
+            st.markdown("## 🔗 Deep Section Analysis")
+            
+            # Section performance matrix
+            st.markdown("### 📊 Section Performance Matrix")
+            
+            section_matrix_data = []
+            for section, pr_score in section_pr.items():
+                page_count = sum(1 for url, sec in analyzer.section_mapping.items() if sec == section)
+                avg_pr = pr_score / page_count if page_count > 0 else 0
+                business_value = analyzer.category_detector.get_business_value(section)
+                
+                section_matrix_data.append({
+                    'Section': section.title(),
+                    'Total PageRank': f"{pr_score:.4f}",
+                    'Page Count': page_count,
+                    'Avg PR/Page': f"{avg_pr:.6f}",
+                    'Business Value': business_value.title(),
+                    '% of Total PR': f"{(pr_score/total_pr*100):.1f}%" if total_pr > 0 else "0%"
+                })
+            
+            section_matrix_df = pd.DataFrame(section_matrix_data)
+            section_matrix_df = section_matrix_df.sort_values('Total PageRank', ascending=False)
+            
+            st.dataframe(section_matrix_df, use_container_width=True, height=400)
+            
+            # Section linking analysis
+            st.markdown("### 🔗 Section Linking Patterns")
+            
+            # Create linking matrix
+            sections = list(section_pr.keys())
+            linking_matrix = pd.DataFrame(index=sections, columns=sections, data=0)
+            
+            for source_section, targets in section_linking.items():
+                for target_section, count in targets.items():
+                    if source_section in linking_matrix.index and target_section in linking_matrix.columns:
+                        linking_matrix.loc[source_section, target_section] = count
+            
+            # Create heatmap
+            fig_heatmap = px.imshow(
+                linking_matrix.values,
+                x=linking_matrix.columns,
+                y=linking_matrix.index,
+                color_continuous_scale='Blues',
+                title='🔥 Section-to-Section Linking Heatmap'
+            )
+            
+            fig_heatmap.update_layout(height=600)
+            st.plotly_chart(fig_heatmap, use_container_width=True)
         
         with tab5:
-            fig_performance = viz_engine.create_category_performance_matrix(analysis_df)
-            if fig_performance:
-                st.plotly_chart(fig_performance, use_container_width=True)
+            st.markdown("## 🤖 AI-Powered Strategic Recommendations")
             
-            category_performance = analysis_df.groupby('Category').agg({
-                'PageRank': 'sum',
-                'Percentage': 'sum',
-                'URL': 'count',
-                'Word_Count': 'mean'
-            }).sort_values('PageRank', ascending=False)
-            st.dataframe(category_performance, use_container_width=True)
+            if openai_key:
+                if st.button("🧠 Generate Comprehensive AI Analysis", type="primary"):
+                    with st.spinner("🤖 AI is analyzing your PageRank data..."):
+                        
+                        # Prepare comprehensive analysis data
+                        analysis_data = {
+                            'total_pages': len(crawled_urls),
+                            'total_links': len(analyzer.graph.edges()),
+                            'sections': list(section_pr.keys()),
+                            'top_sections': [(section, score, (score/total_pr*100) if total_pr > 0 else 0) 
+                                           for section, score in top_sections[:5]],
+                            'top_pages': top_pages[:10],
+                            'business_distribution': {
+                                bv: sum(section_pr[section] for section in section_pr.keys() 
+                                       if analyzer.category_detector.get_business_value(section) == bv)
+                                for bv in ['high', 'medium', 'low']
+                            },
+                            'waste_percentage': waste_percentage,
+                            'priority_alignment': alignment_score if 'alignment_score' in locals() else 'Not analyzed',
+                            'linking_opportunities': redistribution_strategies,
+                            'route_depth_stats': {
+                                'max_depth': max(analyzer.page_data.get(url, {}).get('route_depth', 0) for url in crawled_urls),
+                                'avg_depth': np.mean([analyzer.page_data.get(url, {}).get('route_depth', 0) for url in crawled_urls])
+                            }
+                        }
+                        
+                        ai_recommendations = analyzer.generate_ai_recommendations(analysis_data)
+                        
+                        st.markdown(f"""
+                        <div class="ai-card">
+                            <h3>🤖 AI Strategic Analysis & Recommendations</h3>
+                            <div style="white-space: pre-wrap; font-family: 'Inter', sans-serif; line-height: 1.6;">{ai_recommendations}</div>
+                        </div>
+                        """, unsafe_allow_html=True)
+            else:
+                st.markdown("""
+                <div class="warning-card">
+                    <h4>🤖 AI Recommendations Available</h4>
+                    <p>Add your OpenAI API key in the sidebar to unlock powerful AI-driven strategic recommendations tailored to your specific PageRank analysis.</p>
+                    <p><strong>AI will provide:</strong></p>
+                    <ul>
+                        <li>🎯 Immediate action items with specific implementation steps</li>
+                        <li>📈 Strategic optimizations with timeline recommendations</li>
+                        <li>🔮 Long-term vision for PageRank optimization</li>
+                        <li>⚡ Technical implementation guidance</li>
+                        <li>📊 Expected impact quantification</li>
+                    </ul>
+                </div>
+                """, unsafe_allow_html=True)
+            
+            # Automated insights
+            st.markdown("### 🔍 Automated Strategic Insights")
+            
+            insights = []
+            
+            # Critical insights
+            if waste_percentage > 25:
+                insights.append({
+                    'type': 'critical',
+                    'title': 'Critical PageRank Waste Detected',
+                    'description': f'{waste_percentage:.1f}% of PageRank is flowing to low-value sections',
+                    'action': 'Immediately audit and reduce internal links to tag, category, and help pages'
+                })
+            
+            # Opportunity insights
+            if priority_pages_df is not None and 'alignment_score' in locals() and alignment_score < 50:
+                insights.append({
+                    'type': 'warning',
+                    'title': 'Priority Pages Underperforming',
+                    'description': f'Priority pages alignment score: {alignment_score:.1f}/100',
+                    'action': 'Increase internal links from high-authority pages to priority pages'
+                })
+            
+            # Positive insights
+            high_value_pr = business_values.get('high', 0) / total_pr * 100 if total_pr > 0 else 0
+            if high_value_pr > 60:
+                insights.append({
+                    'type': 'success',
+                    'title': 'Strong High-Value PageRank Distribution',
+                    'description': f'{high_value_pr:.1f}% of PageRank flows to high-value sections',
+                    'action': 'Maintain current strategy and look for incremental optimizations'
+                })
+            
+            for insight in insights:
+                card_type = f"{insight['type']}-card"
+                st.markdown(f"""
+                <div class="{card_type}">
+                    <h4>{insight['title']}</h4>
+                    <p><strong>Analysis:</strong> {insight['description']}</p>
+                    <p><strong>Recommended Action:</strong> {insight['action']}</p>
+                </div>
+                """, unsafe_allow_html=True)
         
         with tab6:
-            fig_network = viz_engine.create_network_visualization(analysis_df, internal_links)
-            if fig_network:
-                st.plotly_chart(fig_network, use_container_width=True)
-            else:
-                st.info("Network visualization requires more interconnected pages")
-        
-        # Recommendations
-        st.subheader("🎯 Priority-Focused SEO Recommendations")
-        
-        recommendations_df = generate_universal_recommendations(analysis_df, category_counts, business_value_mapping, priority_pages_df)
-        
-        if not recommendations_df.empty:
-            # Group recommendations by priority
-            immediate_actions = recommendations_df[recommendations_df['Priority'] == 'Immediate']
-            high_priority = recommendations_df[recommendations_df['Priority'] == 'High']
+            st.markdown("## 📈 Performance Insights & Export")
             
-            if not immediate_actions.empty:
-                st.markdown("### 🚨 Immediate Action Required")
-                st.dataframe(immediate_actions[['Issue', 'Target_Keywords', 'Current_Percentage', 'Current_Rank', 'Recommendation']], use_container_width=True)
+            # Performance summary
+            col1, col2, col3, col4 = st.columns(4)
             
-            if not high_priority.empty:
-                st.markdown("### ⚠️ High Priority Items")
-                st.dataframe(high_priority[['Issue', 'Target_Keywords', 'Current_Percentage', 'Current_Rank', 'Recommendation']], use_container_width=True)
-        else:
-            st.success("🎉 No major PageRank issues found!")
-        
-        # Download section
-        st.subheader("💾 Download Complete Analysis")
-        
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            # Prepare Excel download
-            excel_data = create_excel_download(analysis_df, category_counts, business_value_mapping, priority_pages_df, recommendations_df)
+            with col1:
+                efficiency_score = (business_values.get('high', 0) / total_pr * 100) if total_pr > 0 else 0
+                st.markdown(f"""
+                <div class="metric-card">
+                    <h3>⚡ Efficiency Score</h3>
+                    <h2>{efficiency_score:.1f}%</h2>
+                    <p>High-value PageRank ratio</p>
+                </div>
+                """, unsafe_allow_html=True)
             
-            st.download_button(
-                label="📊 Download Complete Excel Report",
-                data=excel_data,
-                file_name=f"priority_pagerank_analysis_{parsed_url.netloc}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-            )
-        
-        with col2:
-            # CSV download
-            csv_data = analysis_df.to_csv(index=False)
+            with col2:
+                structural_score = max(0, 100 - (waste_percentage * 2))
+                st.markdown(f"""
+                <div class="metric-card">
+                    <h3>🏗️ Structure Score</h3>
+                    <h2>{structural_score:.1f}/100</h2>
+                    <p>Internal linking quality</p>
+                </div>
+                """, unsafe_allow_html=True)
             
-            st.download_button(
-                label="📄 Download CSV Data",
-                data=csv_data,
-                file_name=f"pagerank_data_{parsed_url.netloc}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
-                mime="text/csv"
-            )
-        
-        # Summary insights
-        st.subheader("💡 Key Insights for Your Website")
-        
-        insights = []
-        
-        # Priority pages insights
-        if priority_pages_df is not None and not priority_pages_df.empty:
-            priority_pages = analysis_df[analysis_df['Is_Priority'] == True]
-            if not priority_pages.empty:
-                avg_priority_rank = priority_pages['Rank'].mean()
-                insights.append(f"🎯 **Priority Pages**: {len(priority_pages)} priority pages found, average rank #{int(avg_priority_rank)}")
-                
-                low_performing_priority = priority_pages[priority_pages['Percentage'] < 1]
-                if not low_performing_priority.empty:
-                    insights.append(f"🔴 **Critical**: {len(low_performing_priority)} priority pages receiving less than 1% PageRank")
-        
-        # Website type detection
-        if any(cat in ['product', 'ecommerce', 'shop'] for cat in category_counts.keys()):
-            insights.append("🛒 **E-commerce Site Detected**: Focus on product pages and reduce blog/content PageRank")
-        elif any(cat in ['content', 'blog', 'news'] for cat in category_counts.keys()):
-            insights.append("📰 **Content Site Detected**: Balance content with conversion pages")
-        elif any(cat in ['service', 'company'] for cat in category_counts.keys()):
-            insights.append("🏢 **Corporate Site Detected**: Optimize service pages and reduce informational content")
-        
-        # Performance insights
-        high_value_pr = analysis_df[analysis_df['Business_Value'] == 'High Business Value']['Percentage'].sum()
-        low_value_pr = analysis_df[analysis_df['Business_Value'] == 'Low Business Value']['Percentage'].sum()
-        
-        if low_value_pr > 30:
-            insights.append(f"🔴 **Critical Issue**: {low_value_pr:.1f}% of PageRank is going to low-value pages")
-        
-        if high_value_pr < 20:
-            insights.append(f"🟡 **Optimization Opportunity**: Only {high_value_pr:.1f}% of PageRank reaches high-value pages")
-        
-        # Category insights
-        top_category = max(category_counts.items(), key=lambda x: x[1])
-        insights.append(f"📈 **Dominant Category**: {top_category[0]} ({top_category[1]} pages)")
-        
-        for insight in insights:
-            st.markdown(insight)
-        
-        # Action summary
-        st.subheader("🚀 Next Steps")
-        
-        st.markdown(f"""
-        **Priority-Focused Analysis Results for {parsed_url.netloc}:**
-        1. **Review Priority Pages Performance** - Check individual priority page rankings
-        2. **Optimize Low-Performing Priority Pages** - Increase internal links to underperforming priority pages
-        3. **Focus on Target Keywords** - Align internal linking with target keywords
-        4. **Reduce Low-Value PageRank** - Limit links to non-commercial content
-        5. **Monitor and Track** - Use the Excel report to track improvements
-        
-        **Your Website Analysis Summary:**
-        - **Total Pages Discovered:** {len(page_data)}
-        - **Priority Pages Found:** {len(analysis_df[analysis_df['Is_Priority'] == True])}
-        - **Categories Discovered:** {len(category_counts)}
-        - **High-Value Pages:** {len(analysis_df[analysis_df['Business_Value'] == 'High Business Value'])}
-        - **Optimization Opportunities:** {len(recommendations_df)} items identified
-        
-        **Priority Pages Features:**
-        - ✅ Custom column mapping for URLs and keywords
-        - ✅ Target keyword performance tracking
-        - ✅ Priority vs regular page comparison
-        - ✅ Category-specific priority analysis
-        
-        **Need Help?** The Excel report contains detailed priority page analysis with target keywords and specific recommendations.
-        """)
+            with col3:
+                optimization_potential = min(waste_percentage * 2, 100)
+                st.markdown(f"""
+                <div class="metric-card">
+                    <h3>🚀 Optimization Potential</h3>
+                    <h2>{optimization_potential:.1f}%</h2>
+                    <p>Possible improvement</p>
+                </div>
+                """, unsafe_allow_html=True)
+            
+            with col4:
+                if priority_pages_df is not None and 'alignment_score' in locals():
+                    st.markdown(f"""
+                    <div class="metric-card">
+                        <h3>🎯 Priority Alignment</h3>
+                        <h2>{alignment_score:.1f}/100</h2>
+                        <p>Strategic focus score</p>
+                    </div>
+                    """, unsafe_allow_html=True)
+                else:
+                    st.markdown(f"""
+                    <div class="metric-card">
+                        <h3>📊 Coverage</h3>
+                        <h2>{len(crawled_urls)}</h2>
+                        <p>Pages analyzed</p>
+                    </div>
+                    """, unsafe_allow_html=True)
+            
+            # Export functionality
+            st.markdown("### 📤 Export Analysis Results")
+            
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                if st.button("📊 Download Comprehensive JSON Report", type="primary"):
+                    report_data = {
+                        'analysis_summary': {
+                            'website_url': website_url,
+                            'analysis_date': datetime.now().isoformat(),
+                            'total_pages': len(crawled_urls),
+                            'total_links': len(analyzer.graph.edges()),
+                            'efficiency_score': efficiency_score,
+                            'waste_percentage': waste_percentage
+                        },
+                        'section_analysis': {
+                            section: {
+                                'pagerank': float(pr_score),
+                                'percentage': float((pr_score/total_pr*100) if total_pr > 0 else 0),
+                                'business_value': analyzer.category_detector.get_business_value(section),
+                                'page_count': sum(1 for url, sec in analyzer.section_mapping.items() if sec == section)
+                            }
+                            for section, pr_score in section_pr.items()
+                        },
+                        'top_pages': [
+                            {
+                                'url': url,
+                                'pagerank': float(score),
+                                'rank': i+1,
+                                'section': analyzer.section_mapping.get(url, 'other'),
+                                'title': analyzer.page_data.get(url, {}).get('title', '')
+                            }
+                            for i, (url, score) in enumerate(top_pages[:50])
+                        ],
+                        'recommendations': redistribution_strategies,
+                        'route_analysis': {
+                            url: {
+                                'route_depth': analyzer.page_data.get(url, {}).get('route_depth', 0),
+                                'pagerank': float(analyzer.pagerank_scores.get(url, 0)),
+                                'section': analyzer.section_mapping.get(url, 'other')
+                            }
+                            for url in crawled_urls
+                        }
+                    }
+                    
+                    report_json = json.dumps(report_data, indent=2, default=str)
+                    
+                    st.download_button(
+                        label="📥 Download JSON Report",
+                        data=report_json,
+                        file_name=f"pagerank_analysis_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json",
+                        mime="application/json"
+                    )
+            
+            with col2:
+                if st.button("📋 Download CSV Summary", type="secondary"):
+                    # Create comprehensive CSV
+                    csv_data = []
+                    for url in crawled_urls:
+                        page_data = analyzer.page_data.get(url, {})
+                        csv_data.append({
+                            'URL': url,
+                            'PageRank_Score': analyzer.pagerank_scores.get(url, 0),
+                            'Section': analyzer.section_mapping.get(url, 'other'),
+                            'Business_Value': analyzer.category_detector.get_business_value(analyzer.section_mapping.get(url, 'other')),
+                            'Route_Depth': page_data.get('route_depth', 0),
+                            'Title': page_data.get('title', ''),
+                            'Word_Count': page_data.get('word_count', 0),
+                            'Internal_Links': page_data.get('internal_links', 0),
+                            'External_Links': page_data.get('external_links', 0)
+                        })
+                    
+                    csv_df = pd.DataFrame(csv_data)
+                    csv_string = csv_df.to_csv(index=False)
+                    
+                    st.download_button(
+                        label="📥 Download CSV",
+                        data=csv_string,
+                        file_name=f"pagerank_data_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+                        mime="text/csv"
+                    )
 
 if __name__ == "__main__":
     main()
